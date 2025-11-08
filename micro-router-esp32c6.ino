@@ -1,5 +1,5 @@
 /*
- * XIAO ESP32C6 Micro Wi-Fi Router - Phase 3: NAT/ルーティング機能
+ * XIAO ESP32C6 Micro Wi-Fi Router - 完全版
  *
  * このスケッチは ESP32C6 を Wi-Fi ルーターとして動作させます。
  *
@@ -11,6 +11,8 @@
  * - 初回起動と設定済み起動の自動判定
  * - NAT/NAPT によるパケット転送
  * - DNS フォワーディング
+ * - 自動再接続機能
+ * - メモリ監視
  *
  * ハードウェア: Seeed Studio XIAO ESP32C6
  * ボード設定: XIAO_ESP32C6
@@ -23,15 +25,31 @@
 #include <esp_netif.h>  // ESP-IDF netif API（NAT機能用）
 
 // ===== AP モード設定 =====
-#define AP_SSID "micro-router-esp32c6"
-#define AP_PASSWORD "esp32c6router"  // WPA2-PSK用パスワード (8文字以上)
-#define AP_CHANNEL 6
-#define AP_MAX_CONNECTIONS 3
+const char* AP_SSID = "micro-router-esp32c6";
+const char* AP_PASSWORD = "esp32c6router";  // WPA2-PSK用パスワード (8文字以上)
+const uint8_t AP_CHANNEL = 6;
+const uint8_t AP_MAX_CONNECTIONS = 3;
 
 // ===== IP アドレス設定 =====
-IPAddress apIP(192, 168, 4, 1);
-IPAddress gateway(192, 168, 4, 1);
-IPAddress subnet(255, 255, 255, 0);
+const IPAddress AP_IP(192, 168, 4, 1);
+const IPAddress AP_GATEWAY(192, 168, 4, 1);
+const IPAddress AP_SUBNET(255, 255, 255, 0);
+
+// ===== タイミング設定 =====
+const unsigned long STA_RECONNECT_INTERVAL = 5000;   // STA再接続間隔（ミリ秒）
+const unsigned long STATUS_PRINT_INTERVAL = 10000;   // ステータス表示間隔（ミリ秒）
+const unsigned long STA_CONNECTION_TIMEOUT = 30000;  // STA接続タイムアウト（ミリ秒）
+const unsigned long CONFIG_SAVE_DELAY = 5000;        // 設定保存後の再起動遅延（ミリ秒）
+const unsigned long NAT_ENABLE_DELAY = 1000;         // NAT有効化前の遅延（ミリ秒）
+
+// ===== メモリ管理設定 =====
+const uint32_t MIN_FREE_HEAP_WARNING = 50000;  // メモリ不足警告閾値（バイト）
+
+// ===== Preferences 設定 =====
+const char* PREF_NAMESPACE = "wifi-config";
+const char* PREF_KEY_STA_SSID = "sta_ssid";
+const char* PREF_KEY_STA_PASSWORD = "sta_password";
+const char* PREF_KEY_CONFIGURED = "configured";
 
 // ===== グローバル変数 =====
 WebServer server(80);
@@ -44,22 +62,40 @@ struct WifiConfig {
   bool configured;        // 設定済みフラグ
 } config;
 
-// STA 再接続管理用
-unsigned long lastReconnectAttempt = 0;
-const unsigned long reconnectInterval = 5000;  // 5秒
-bool lastSTAConnected = false;  // 前回の STA 接続状態
-bool natEnabled = false;  // NAT 有効化済みフラグ
-bool needEnableNAT = false;  // NAT 有効化リクエストフラグ
+// ===== 状態管理変数 =====
+unsigned long lastReconnectAttempt = 0;  // 最後の再接続試行時刻
+unsigned long lastStatusPrint = 0;       // 最後のステータス表示時刻
+bool lastSTAConnected = false;           // 前回の STA 接続状態
+bool natEnabled = false;                 // NAT 有効化済みフラグ
+bool needEnableNAT = false;              // NAT 有効化リクエストフラグ
 
 // ===== 関数プロトタイプ =====
+// 設定管理
 void loadConfig();
 void saveConfig(const char* ssid, const char* password);
+
+// Wi-Fi セットアップ
 void setupAP();
 void setupSTA();
+
+// NAT 機能
 void enableNAT();
+
+// イベントハンドラ
 void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
+
+// Web サーバー
 void handleRoot();
 void handleSave();
+
+// ループ処理
+void processNATEnableRequest();
+void checkAndReconnectSTA();
+void printPeriodicStatus();
+
+// ユーティリティ
+void printMemoryInfo();
+void printSeparator(const char* title = nullptr);
 
 void setup() {
   // シリアル通信の初期化
@@ -67,10 +103,7 @@ void setup() {
   delay(1000);  // シリアルの安定化を待つ
 
   Serial.println();
-  Serial.println("========================================");
-  Serial.println("XIAO ESP32C6 マイクロ Wi-Fi ルーター");
-  Serial.println("Phase 2: Web UI と設定保存");
-  Serial.println("========================================");
+  printSeparator("XIAO ESP32C6 マイクロ Wi-Fi ルーター");
   Serial.println();
 
   // WiFi イベントハンドラの登録
@@ -111,56 +144,78 @@ void setup() {
   Serial.println("Web サーバー起動: http://192.168.4.1");
 
   Serial.println();
-  Serial.println("========================================");
-  Serial.println("セットアップ完了");
-  Serial.println("========================================");
+  printSeparator("セットアップ完了");
   Serial.println();
 }
 
+// ===== ループ処理 =====
+
 void loop() {
-  // NAT 有効化リクエストがある場合、処理する
-  if (needEnableNAT) {
-    needEnableNAT = false;
-    Serial.println();
-    Serial.println("loop() から NAT を有効化します...");
-    delay(1000);  // lwIP スタックの安定化を待つ
-    enableNAT();
-    natEnabled = true;
-  }
+  // NAT 有効化リクエストの処理
+  processNATEnableRequest();
 
   // Web サーバーのリクエスト処理
   server.handleClient();
 
-  // STA 再接続処理（設定済みの場合のみ）
-  if (config.configured) {
-    bool staConnected = WiFi.status() == WL_CONNECTED;
-    unsigned long now = millis();
+  // STA 再接続処理
+  checkAndReconnectSTA();
 
-    // STA が切断されている場合、再接続を試みる
-    if (!staConnected && (now - lastReconnectAttempt > reconnectInterval)) {
-      Serial.println();
-      Serial.println("STA 切断検知 - 再接続中...");
-      WiFi.disconnect();
-      WiFi.begin(config.sta_ssid, config.sta_password);
-      lastReconnectAttempt = now;
-    }
+  // 定期的なステータス表示
+  printPeriodicStatus();
+}
 
-    // 切断から接続に変わった場合
-    // WiFiイベントハンドラで自動的にNATが再有効化されます
-    if (staConnected && !lastSTAConnected) {
-      Serial.println();
-      Serial.println("STA 再接続成功");
-      Serial.println("（WiFi イベントハンドラが NAT を再有効化します）");
-    }
+/**
+ * NAT 有効化リクエストを処理する
+ */
+void processNATEnableRequest() {
+  if (needEnableNAT) {
+    needEnableNAT = false;
+    Serial.println();
+    Serial.println("loop() から NAT を有効化します...");
+    delay(NAT_ENABLE_DELAY);  // lwIP スタックの安定化を待つ
+    enableNAT();
+    natEnabled = true;
+  }
+}
 
-    lastSTAConnected = staConnected;
+/**
+ * STA 接続を監視し、切断時に自動再接続を試みる
+ */
+void checkAndReconnectSTA() {
+  if (!config.configured) {
+    return;  // 未設定の場合は何もしない
   }
 
-  // 接続中のクライアント数を定期的に表示
-  static unsigned long lastPrint = 0;
+  bool staConnected = WiFi.status() == WL_CONNECTED;
   unsigned long now = millis();
 
-  if (now - lastPrint >= 10000) {  // 10秒ごと
+  // STA が切断されている場合、再接続を試みる
+  if (!staConnected && (now - lastReconnectAttempt > STA_RECONNECT_INTERVAL)) {
+    Serial.println();
+    Serial.println("STA 切断検知 - 再接続中...");
+    WiFi.disconnect();
+    WiFi.begin(config.sta_ssid, config.sta_password);
+    lastReconnectAttempt = now;
+  }
+
+  // 切断から接続に変わった場合
+  // WiFiイベントハンドラで自動的にNATが再有効化されます
+  if (staConnected && !lastSTAConnected) {
+    Serial.println();
+    Serial.println("STA 再接続成功");
+    Serial.println("（WiFi イベントハンドラが NAT を再有効化します）");
+  }
+
+  lastSTAConnected = staConnected;
+}
+
+/**
+ * 定期的にステータス情報を表示する
+ */
+void printPeriodicStatus() {
+  unsigned long now = millis();
+
+  if (now - lastStatusPrint >= STATUS_PRINT_INTERVAL) {
     int clientCount = WiFi.softAPgetStationNum();
     bool staConnected = WiFi.status() == WL_CONNECTED;
     uint32_t freeHeap = ESP.getFreeHeap();
@@ -186,15 +241,17 @@ void loop() {
     Serial.print(" KB)");
 
     // メモリ不足の警告
-    if (freeHeap < 50000) {
+    if (freeHeap < MIN_FREE_HEAP_WARNING) {
       Serial.print(" ⚠ 警告: メモリ不足");
     }
 
     Serial.println();
 
-    lastPrint = now;
+    lastStatusPrint = now;
   }
 }
+
+// ===== 設定管理関数 =====
 
 /**
  * Preferences から設定を読み込む
@@ -202,11 +259,11 @@ void loop() {
 void loadConfig() {
   Serial.println("--- 設定読み込み開始 ---");
 
-  preferences.begin("wifi-config", true);  // Read-only モード
+  preferences.begin(PREF_NAMESPACE, true);  // Read-only モード
 
-  String ssid = preferences.getString("sta_ssid", "");
-  String password = preferences.getString("sta_password", "");
-  config.configured = preferences.getBool("configured", false);
+  String ssid = preferences.getString(PREF_KEY_STA_SSID, "");
+  String password = preferences.getString(PREF_KEY_STA_PASSWORD, "");
+  config.configured = preferences.getBool(PREF_KEY_CONFIGURED, false);
 
   ssid.toCharArray(config.sta_ssid, 33);
   password.toCharArray(config.sta_password, 65);
@@ -230,11 +287,11 @@ void loadConfig() {
 void saveConfig(const char* ssid, const char* password) {
   Serial.println("--- 設定保存開始 ---");
 
-  preferences.begin("wifi-config", false);  // Read/Write モード
+  preferences.begin(PREF_NAMESPACE, false);  // Read/Write モード
 
-  preferences.putString("sta_ssid", ssid);
-  preferences.putString("sta_password", password);
-  preferences.putBool("configured", true);
+  preferences.putString(PREF_KEY_STA_SSID, ssid);
+  preferences.putString(PREF_KEY_STA_PASSWORD, password);
+  preferences.putBool(PREF_KEY_CONFIGURED, true);
 
   preferences.end();
 
@@ -245,6 +302,8 @@ void saveConfig(const char* ssid, const char* password) {
 
   Serial.println("--- 設定保存完了 ---");
 }
+
+// ===== Wi-Fi セットアップ関数 =====
 
 /**
  * AP モードのセットアップ
@@ -257,12 +316,12 @@ void setupAP() {
   Serial.println("--- AP モード設定開始 ---");
 
   // AP の固定 IP アドレスを設定
-  if (!WiFi.softAPConfig(apIP, gateway, subnet)) {
+  if (!WiFi.softAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET)) {
     Serial.println("エラー: AP IP 設定に失敗しました");
     return;
   }
   Serial.print("AP IP アドレス: ");
-  Serial.println(apIP);
+  Serial.println(AP_IP);
 
   // AP モードを起動
   // WiFi.softAP(ssid, password, channel, ssid_hidden, max_connection)
@@ -300,9 +359,10 @@ void setupSTA() {
 
   WiFi.begin(config.sta_ssid, config.sta_password);
 
-  // 接続待機（最大 30 秒）
+  // 接続待機（タイムアウト設定に従う）
   unsigned long startAttemptTime = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 30000) {
+  while (WiFi.status() != WL_CONNECTED &&
+         millis() - startAttemptTime < STA_CONNECTION_TIMEOUT) {
     Serial.print(".");
     delay(500);
   }
@@ -323,13 +383,17 @@ void setupSTA() {
     Serial.println();
     Serial.println("WiFi イベント ARDUINO_EVENT_WIFI_STA_GOT_IP で NAT を有効化します");
   } else {
-    Serial.println("エラー: STA 接続に失敗しました（30秒タイムアウト）");
+    Serial.print("エラー: STA 接続に失敗しました（");
+    Serial.print(STA_CONNECTION_TIMEOUT / 1000);
+    Serial.println("秒タイムアウト）");
     Serial.println("AP モードは引き続き動作します");
   }
 
   Serial.println("--- STA モード設定完了 ---");
   Serial.println();
 }
+
+// ===== イベントハンドラ =====
 
 /**
  * WiFi イベントハンドラ
@@ -373,6 +437,8 @@ void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
       break;
   }
 }
+
+// ===== NAT 機能 =====
 
 /**
  * NAT/NAPT 機能を有効化
@@ -442,6 +508,8 @@ void enableNAT() {
   Serial.println("--- NAT 有効化処理完了 ---");
   Serial.println();
 }
+
+// ===== Web サーバーハンドラ =====
 
 /**
  * Web UI のルートページ（ステータス表示 + 設定フォーム）
@@ -540,7 +608,7 @@ void handleSave() {
   // 成功ページ
   String html = "<!DOCTYPE html><html><head>";
   html += "<meta charset='UTF-8'>";
-  html += "<meta http-equiv='refresh' content='5;url=/'>";
+  html += "<meta http-equiv='refresh' content='" + String(CONFIG_SAVE_DELAY / 1000) + ";url=/'>";
   html += "<style>";
   html += "body{font-family:Arial,sans-serif;max-width:600px;margin:100px auto;padding:20px;text-align:center;}";
   html += "h1{color:#28a745;}";
@@ -548,18 +616,54 @@ void handleSave() {
   html += "</style>";
   html += "</head><body>";
   html += "<h1>✓ 設定を保存しました</h1>";
-  html += "<p>5秒後に再起動します...</p>";
+  html += "<p>" + String(CONFIG_SAVE_DELAY / 1000) + "秒後に再起動します...</p>";
   html += "<p>再起動後、設定した Wi-Fi に接続します。</p>";
   html += "</body></html>";
 
   server.send(200, "text/html", html);
 
   Serial.println();
-  Serial.println("========================================");
-  Serial.println("設定保存完了 - 5秒後に再起動します");
-  Serial.println("========================================");
+  printSeparator("設定保存完了");
+  Serial.print(CONFIG_SAVE_DELAY / 1000);
+  Serial.println("秒後に再起動します");
+  printSeparator();
 
   // 再起動
-  delay(5000);
+  delay(CONFIG_SAVE_DELAY);
   ESP.restart();
+}
+
+// ===== ユーティリティ関数 =====
+
+/**
+ * メモリ情報を表示する
+ */
+void printMemoryInfo() {
+  uint32_t freeHeap = ESP.getFreeHeap();
+  uint32_t minFreeHeap = ESP.getMinFreeHeap();
+
+  Serial.println("=== メモリ情報 ===");
+  Serial.print("空きヒープ: ");
+  Serial.print(freeHeap);
+  Serial.println(" バイト");
+  Serial.print("最小空きヒープ: ");
+  Serial.print(minFreeHeap);
+  Serial.println(" バイト");
+
+  if (freeHeap < MIN_FREE_HEAP_WARNING) {
+    Serial.println("⚠ 警告: メモリ不足");
+  }
+}
+
+/**
+ * 区切り線を表示する
+ *
+ * @param title タイトル（省略可）
+ */
+void printSeparator(const char* title) {
+  Serial.println("========================================");
+  if (title != nullptr && strlen(title) > 0) {
+    Serial.println(title);
+    Serial.println("========================================");
+  }
 }
