@@ -275,7 +275,9 @@ struct dhcp_lease {
 struct WifiConfigData {
     char sta_ssid[33];       // 最大 32 文字 + null 終端
     char sta_password[65];   // 最大 64 文字 + null 終端
+    char ap_password[65];    // 最大 64 文字 + null 終端 (Phase 6)
     bool configured;         // 設定済みフラグ
+    bool ap_password_set;    // AP パスワード設定済みフラグ (Phase 6)
 };
 
 // 使用例:
@@ -285,12 +287,16 @@ preferences.begin("wifi-config", false);  // Read/Write モード
 // 読み込み
 String ssid = preferences.getString("sta_ssid", "");
 String password = preferences.getString("sta_password", "");
+String apPassword = preferences.getString("ap_password", "esp32c6router");  // Phase 6
 bool isConfigured = preferences.getBool("configured", false);
+bool apPasswordSet = preferences.getBool("ap_pw_set", false);  // Phase 6
 
 // 書き込み
 preferences.putString("sta_ssid", "MyHomeWiFi");
 preferences.putString("sta_password", "mypassword");
+preferences.putString("ap_password", "newAPpassword123");  // Phase 6
 preferences.putBool("configured", true);
+preferences.putBool("ap_pw_set", true);  // Phase 6
 
 preferences.end();
 ```
@@ -317,13 +323,27 @@ preferences.end();
 │  └───────────────────────────────┘  │
 │                                     │
 │  ┌───────────────────────────────┐  │
+│  │ Key: "ap_password" (Phase 6)  │  │
+│  │ Type: String                  │  │
+│  │ Value: "newAPpassword123"     │  │
+│  │ Size: 16 bytes                │  │
+│  └───────────────────────────────┘  │
+│                                     │
+│  ┌───────────────────────────────┐  │
 │  │ Key: "configured"             │  │
 │  │ Type: Bool                    │  │
 │  │ Value: true                   │  │
 │  │ Size: 1 byte                  │  │
 │  └───────────────────────────────┘  │
 │                                     │
-│  Total: ~24 bytes (+ metadata)      │
+│  ┌───────────────────────────────┐  │
+│  │ Key: "ap_pw_set" (Phase 6)    │  │
+│  │ Type: Bool                    │  │
+│  │ Value: true                   │  │
+│  │ Size: 1 byte                  │  │
+│  └───────────────────────────────┘  │
+│                                     │
+│  Total: ~41 bytes (+ metadata)      │
 └─────────────────────────────────────┘
 ```
 
@@ -337,9 +357,10 @@ struct wifi_config {
     char sta_password[65];
     bool sta_configured;
 
-    // AP モード設定 (ハードコード)
-    char ap_ssid[32];
-    char ap_password[64];
+    // AP モード設定
+    char ap_ssid[32];         // ハードコード: "micro-router-esp32c6"
+    char ap_password[65];     // EEPROM から読み込み (Phase 6)、デフォルト: "esp32c6router"
+    bool ap_password_set;     // AP パスワード設定済みフラグ (Phase 6)
     uint8_t ap_channel;
     uint8_t ap_max_connections;
 
@@ -617,13 +638,15 @@ WebEndpoint endpoints[] = {
 
 ### 7.2 NVS (EEPROM) 使用量
 
-| 項目           | サイズ         |
-| -------------- | -------------- |
-| sta_ssid       | 最大 33 bytes  |
-| sta_password   | 最大 65 bytes  |
-| configured     | 1 byte         |
-| NVS メタデータ | ~100 bytes     |
-| **合計**       | **~200 bytes** |
+| 項目               | サイズ         |
+| ------------------ | -------------- |
+| sta_ssid           | 最大 33 bytes  |
+| sta_password       | 最大 65 bytes  |
+| ap_password (Ph6)  | 最大 65 bytes  |
+| configured         | 1 byte         |
+| ap_pw_set (Ph6)    | 1 byte         |
+| NVS メタデータ     | ~100 bytes     |
+| **合計**           | **~265 bytes** |
 
 ### 7.3 スループット制限要因
 

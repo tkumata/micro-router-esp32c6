@@ -49,7 +49,12 @@ const uint32_t MIN_FREE_HEAP_WARNING = 50000;  // メモリ不足警告閾値（
 const char* PREF_NAMESPACE = "wifi-config";
 const char* PREF_KEY_STA_SSID = "sta_ssid";
 const char* PREF_KEY_STA_PASSWORD = "sta_password";
+const char* PREF_KEY_AP_PASSWORD = "ap_password";      // Phase 6
 const char* PREF_KEY_CONFIGURED = "configured";
+const char* PREF_KEY_AP_PASSWORD_SET = "ap_pw_set";    // Phase 6
+
+// ===== デフォルト値 =====
+const char* DEFAULT_AP_PASSWORD = "esp32c6router";     // Phase 6
 
 // ===== グローバル変数 =====
 WebServer server(80);
@@ -59,7 +64,9 @@ Preferences preferences;
 struct WifiConfig {
   char sta_ssid[33];      // SSID 最大 32 文字 + NULL
   char sta_password[65];  // パスワード最大 64 文字 + NULL
+  char ap_password[65];   // AP パスワード最大 64 文字 + NULL (Phase 6)
   bool configured;        // 設定済みフラグ
+  bool ap_password_set;   // AP パスワード設定済みフラグ (Phase 6)
 } config;
 
 // ===== 状態管理変数 =====
@@ -73,6 +80,7 @@ bool needEnableNAT = false;              // NAT 有効化リクエストフラ�
 // 設定管理
 void loadConfig();
 void saveConfig(const char* ssid, const char* password);
+void saveAPPassword(const char* password);  // Phase 6
 
 // Wi-Fi セットアップ
 void setupAP();
@@ -87,6 +95,7 @@ void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
 // Web サーバー
 void handleRoot();
 void handleSave();
+void handleSaveAPPassword();  // Phase 6
 
 // ループ処理
 void processNATEnableRequest();
@@ -139,6 +148,7 @@ void setup() {
   // Web サーバーの起動
   server.on("/", handleRoot);
   server.on("/save", HTTP_POST, handleSave);
+  server.on("/save_ap_password", HTTP_POST, handleSaveAPPassword);  // Phase 6
   server.begin();
   Serial.println();
   Serial.println("Web サーバー起動: http://192.168.4.1");
@@ -263,15 +273,20 @@ void loadConfig() {
 
   String ssid = preferences.getString(PREF_KEY_STA_SSID, "");
   String password = preferences.getString(PREF_KEY_STA_PASSWORD, "");
+  String apPassword = preferences.getString(PREF_KEY_AP_PASSWORD, DEFAULT_AP_PASSWORD);  // Phase 6
   config.configured = preferences.getBool(PREF_KEY_CONFIGURED, false);
+  config.ap_password_set = preferences.getBool(PREF_KEY_AP_PASSWORD_SET, false);  // Phase 6
 
   ssid.toCharArray(config.sta_ssid, 33);
   password.toCharArray(config.sta_password, 65);
+  apPassword.toCharArray(config.ap_password, 65);  // Phase 6
 
   preferences.end();
 
   Serial.print("設定済みフラグ: ");
   Serial.println(config.configured ? "YES" : "NO");
+  Serial.print("AP パスワード設定済み: ");
+  Serial.println(config.ap_password_set ? "YES" : "NO (デフォルト使用)");
   if (config.configured) {
     Serial.print("保存されている SSID: ");
     Serial.println(config.sta_ssid);
@@ -303,6 +318,25 @@ void saveConfig(const char* ssid, const char* password) {
   Serial.println("--- 設定保存完了 ---");
 }
 
+/**
+ * AP パスワードを Preferences に保存する (Phase 6)
+ */
+void saveAPPassword(const char* password) {
+  Serial.println("--- AP パスワード保存開始 ---");
+
+  preferences.begin(PREF_NAMESPACE, false);  // Read/Write モード
+
+  preferences.putString(PREF_KEY_AP_PASSWORD, password);
+  preferences.putBool(PREF_KEY_AP_PASSWORD_SET, true);
+
+  preferences.end();
+
+  Serial.println("AP パスワード: ********");
+  Serial.println("AP パスワード設定済みフラグ: YES");
+
+  Serial.println("--- AP パスワード保存完了 ---");
+}
+
 // ===== Wi-Fi セットアップ関数 =====
 
 /**
@@ -323,9 +357,9 @@ void setupAP() {
   Serial.print("AP IP アドレス: ");
   Serial.println(AP_IP);
 
-  // AP モードを起動
+  // AP モードを起動（config.ap_password を使用 - Phase 6）
   // WiFi.softAP(ssid, password, channel, ssid_hidden, max_connection)
-  if (!WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, 0, AP_MAX_CONNECTIONS)) {
+  if (!WiFi.softAP(AP_SSID, config.ap_password, AP_CHANNEL, 0, AP_MAX_CONNECTIONS)) {
     Serial.println("エラー: AP 起動に失敗しました");
     return;
   }
@@ -334,7 +368,7 @@ void setupAP() {
   Serial.print("SSID: ");
   Serial.println(AP_SSID);
   Serial.print("パスワード: ");
-  Serial.println(AP_PASSWORD);
+  Serial.println(config.ap_password_set ? "カスタム設定済み" : "デフォルト");
   Serial.print("チャンネル: ");
   Serial.println(AP_CHANNEL);
   Serial.print("最大接続数: ");
@@ -541,6 +575,7 @@ void handleRoot() {
   html += "button:hover{background:#0056b3;}";
   html += ".connected{color:#28a745;}";
   html += ".disconnected{color:#dc3545;}";
+  html += ".section{background:#fff;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:20px 0;}";
   html += "</style>";
   html += "</head><body>";
 
@@ -554,12 +589,13 @@ void handleRoot() {
   html += "</strong></p>";
   html += "<p>STA IP: <strong>" + staIP + "</strong></p>";
   html += "<p>AP クライアント数: <strong>" + String(apClients) + " / " + String(AP_MAX_CONNECTIONS) + "</strong></p>";
+  html += "<p>AP パスワード: <strong>" + String(config.ap_password_set ? "カスタム設定済み" : "デフォルト") + "</strong></p>";
   html += "<p>空きメモリ: <strong>" + String(freeHeap / 1024) + " KB</strong></p>";
   html += "</div>";
 
-  // 設定フォーム
-  html += "<h2>Wi-Fi 設定</h2>";
-  html += "<div class='status'>";
+  // STA 設定フォーム
+  html += "<div class='section'>";
+  html += "<h2>Wi-Fi (STA) 設定</h2>";
   html += "<p>接続したい既存の Wi-Fi ネットワークの情報を入力してください。</p>";
   html += "<form method='POST' action='/save'>";
   html += "<div class='form-group'>";
@@ -571,6 +607,19 @@ void handleRoot() {
   html += "<input type='password' name='password' placeholder='8文字以上' required minlength='8' maxlength='64'>";
   html += "</div>";
   html += "<button type='submit'>保存して再起動</button>";
+  html += "</form>";
+  html += "</div>";
+
+  // AP パスワード設定フォーム (Phase 6)
+  html += "<div class='section'>";
+  html += "<h2>AP パスワード変更</h2>";
+  html += "<p>このルーターの Wi-Fi アクセスポイント (micro-router-esp32c6) のパスワードを変更できます。</p>";
+  html += "<form method='POST' action='/save_ap_password'>";
+  html += "<div class='form-group'>";
+  html += "<label>新しい AP パスワード:</label>";
+  html += "<input type='password' name='ap_password' placeholder='8文字以上' required minlength='8' maxlength='64'>";
+  html += "</div>";
+  html += "<button type='submit'>AP パスワードを保存して再起動</button>";
   html += "</form>";
   html += "</div>";
 
@@ -624,6 +673,52 @@ void handleSave() {
 
   Serial.println();
   printSeparator("設定保存完了");
+  Serial.print(CONFIG_SAVE_DELAY / 1000);
+  Serial.println("秒後に再起動します");
+  printSeparator();
+
+  // 再起動
+  delay(CONFIG_SAVE_DELAY);
+  ESP.restart();
+}
+
+/**
+ * AP パスワード保存エンドポイント（POST /save_ap_password）(Phase 6)
+ */
+void handleSaveAPPassword() {
+  // フォームデータ取得
+  String apPassword = server.arg("ap_password");
+
+  // 入力検証
+  if (apPassword.length() < 8 || apPassword.length() > 64) {
+    server.send(400, "text/html",
+                "<html><body><h1>エラー</h1><p>AP パスワードは 8〜64 文字で入力してください</p>"
+                "<a href='/'>戻る</a></body></html>");
+    return;
+  }
+
+  // AP パスワード保存
+  saveAPPassword(apPassword.c_str());
+
+  // 成功ページ
+  String html = "<!DOCTYPE html><html><head>";
+  html += "<meta charset='UTF-8'>";
+  html += "<meta http-equiv='refresh' content='" + String(CONFIG_SAVE_DELAY / 1000) + ";url=/'>";
+  html += "<style>";
+  html += "body{font-family:Arial,sans-serif;max-width:600px;margin:100px auto;padding:20px;text-align:center;}";
+  html += "h1{color:#28a745;}";
+  html += "p{font-size:18px;color:#555;}";
+  html += "</style>";
+  html += "</head><body>";
+  html += "<h1>✓ AP パスワードを保存しました</h1>";
+  html += "<p>" + String(CONFIG_SAVE_DELAY / 1000) + "秒後に再起動します...</p>";
+  html += "<p>再起動後、新しいパスワードで AP に接続してください。</p>";
+  html += "</body></html>";
+
+  server.send(200, "text/html", html);
+
+  Serial.println();
+  printSeparator("AP パスワード保存完了");
   Serial.print(CONFIG_SAVE_DELAY / 1000);
   Serial.println("秒後に再起動します");
   printSeparator();

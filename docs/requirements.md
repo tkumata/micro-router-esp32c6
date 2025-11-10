@@ -90,12 +90,14 @@ XIAO ESP32C6 を使用した極小 Wi-Fi ルーターの実装。既存の Wi-Fi
 - **設定項目**:
   - 既存 Wi-Fi の SSID 入力
   - 既存 Wi-Fi のパスワード入力
+  - AP モードのパスワード変更（Phase 6 で追加）
   - 保存ボタン
   - 再起動ボタン
 - **ステータス表示**:
   - STA 接続状態（接続済み/未接続）
   - STA IP アドレス
   - AP 接続クライアント数
+  - 現在の AP パスワード（マスク表示）
   - メモリ使用量
 - **UI デザイン**: シンプルな HTML フォーム（JavaScript 不要）
 
@@ -105,9 +107,11 @@ XIAO ESP32C6 を使用した極小 Wi-Fi ルーターの実装。既存の Wi-Fi
 - **保存データ**:
   - STA モード SSID (最大 32 文字)
   - STA モード パスワード (最大 64 文字)
+  - AP モード パスワード (最大 64 文字) - Phase 6 で追加
   - 設定済みフラグ
+  - AP パスワード設定済みフラグ - Phase 6 で追加
 - **データ永続化**: 電源オフ後も設定を保持
-- **初期状態**: 未設定の場合は AP モードのみで起動
+- **初期状態**: 未設定の場合は AP モードのみで起動、AP パスワードはデフォルト値 "esp32c6router" を使用
 
 ## 4. 非機能要件
 
@@ -172,7 +176,9 @@ XIAO ESP32C6 を使用した極小 Wi-Fi ルーターの実装。既存の Wi-Fi
 struct WifiConfig {
   char sta_ssid[33];      // 最大 32 文字 + null終端
   char sta_password[65];  // 最大 64 文字 + null終端
+  char ap_password[65];   // 最大 64 文字 + null終端 (Phase 6)
   bool configured;        // 設定済みフラグ
+  bool ap_password_set;   // AP パスワード設定済みフラグ (Phase 6)
 };
 ```
 
@@ -245,6 +251,12 @@ struct WifiConfig {
 
 - パフォーマンスチューニング
 - ログ機能の追加
+
+### Phase 6: AP パスワード永続化
+
+- AP パスワードの NVS 保存機能
+- Web UI での AP パスワード変更機能
+- デフォルトパスワード "esp32c6router" からの移行
 
 ## 9. 起動シーケンス
 
