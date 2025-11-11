@@ -9,6 +9,7 @@
 | Phase 3  | 2-3 日   | NAT/ルーティング機能の実装  |
 | Phase 4  | 1-2 日   | エラーハンドリングと安定化  |
 | Phase 5  | 1 日     | 最適化とテスト              |
+| Phase 6  | 1 日     | AP パスワード永続化         |
 
 ---
 
@@ -965,4 +966,388 @@ void handleWebRequests();
 
 ---
 
-**最終更新**: 2025-11-08
+## Phase 6: AP パスワード永続化
+
+### タスク 6.1 - データ構造の拡張
+
+- [x] WifiConfig 構造体に ap_password フィールドを追加
+- [x] WifiConfig 構造体に ap_password_set フラグを追加
+- [x] Preferences キー定数の追加
+
+**実装コード例**:
+
+```cpp
+// ===== Preferences 設定 =====
+const char* PREF_NAMESPACE = "wifi-config";
+const char* PREF_KEY_STA_SSID = "sta_ssid";
+const char* PREF_KEY_STA_PASSWORD = "sta_password";
+const char* PREF_KEY_AP_PASSWORD = "ap_password";      // Phase 6
+const char* PREF_KEY_CONFIGURED = "configured";
+const char* PREF_KEY_AP_PASSWORD_SET = "ap_pw_set";    // Phase 6
+
+// デフォルト AP パスワード
+const char* DEFAULT_AP_PASSWORD = "esp32c6router";
+
+// 設定データ構造体
+struct WifiConfig {
+  char sta_ssid[33];      // SSID 最大 32 文字 + NULL
+  char sta_password[65];  // パスワード最大 64 文字 + NULL
+  char ap_password[65];   // AP パスワード最大 64 文字 + NULL (Phase 6)
+  bool configured;        // STA 設定済みフラグ
+  bool ap_password_set;   // AP パスワード設定済みフラグ (Phase 6)
+} config;
+```
+
+**検証方法**:
+
+- コンパイルエラーが発生しないことを確認
+
+---
+
+### タスク 6.2 - loadConfig() の拡張
+
+- [x] AP パスワードを NVS から読み込み
+- [x] 未設定の場合はデフォルトパスワードを使用
+
+**実装コード例**:
+
+```cpp
+void loadConfig() {
+  Serial.println("--- 設定読み込み開始 ---");
+
+  preferences.begin(PREF_NAMESPACE, true);  // Read-only モード
+
+  String ssid = preferences.getString(PREF_KEY_STA_SSID, "");
+  String password = preferences.getString(PREF_KEY_STA_PASSWORD, "");
+  String apPassword = preferences.getString(PREF_KEY_AP_PASSWORD, DEFAULT_AP_PASSWORD);  // Phase 6
+  config.configured = preferences.getBool(PREF_KEY_CONFIGURED, false);
+  config.ap_password_set = preferences.getBool(PREF_KEY_AP_PASSWORD_SET, false);  // Phase 6
+
+  ssid.toCharArray(config.sta_ssid, 33);
+  password.toCharArray(config.sta_password, 65);
+  apPassword.toCharArray(config.ap_password, 65);  // Phase 6
+
+  preferences.end();
+
+  Serial.print("設定済みフラグ: ");
+  Serial.println(config.configured ? "YES" : "NO");
+  Serial.print("AP パスワード設定済み: ");
+  Serial.println(config.ap_password_set ? "YES" : "NO (デフォルト使用)");
+
+  if (config.configured) {
+    Serial.print("保存されている SSID: ");
+    Serial.println(config.sta_ssid);
+  }
+
+  Serial.println("--- 設定読み込み完了 ---");
+  Serial.println();
+}
+```
+
+**検証方法**:
+
+- 初回起動時にデフォルトパスワードが使用される
+- シリアルログで確認
+
+---
+
+### タスク 6.3 - saveConfig() の拡張（AP パスワード保存用）
+
+- [x] 新しい関数 saveAPPassword() を追加
+- [x] AP パスワードを NVS に保存
+
+**実装コード例**:
+
+```cpp
+/**
+ * AP パスワードを Preferences に保存する
+ */
+void saveAPPassword(const char* password) {
+  Serial.println("--- AP パスワード保存開始 ---");
+
+  preferences.begin(PREF_NAMESPACE, false);  // Read/Write モード
+
+  preferences.putString(PREF_KEY_AP_PASSWORD, password);
+  preferences.putBool(PREF_KEY_AP_PASSWORD_SET, true);
+
+  preferences.end();
+
+  Serial.println("AP パスワード: ********");
+  Serial.println("AP パスワード設定済みフラグ: YES");
+
+  Serial.println("--- AP パスワード保存完了 ---");
+}
+```
+
+**検証方法**:
+
+- 保存後、再起動して読み込まれることを確認
+
+---
+
+### タスク 6.4 - setupAP() の修正
+
+- [x] ハードコードされた AP_PASSWORD を config.ap_password に変更
+
+**実装コード例**:
+
+```cpp
+void setupAP() {
+  Serial.println("--- AP モード設定開始 ---");
+
+  // AP の固定 IP アドレスを設定
+  if (!WiFi.softAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET)) {
+    Serial.println("エラー: AP IP 設定に失敗しました");
+    return;
+  }
+  Serial.print("AP IP アドレス: ");
+  Serial.println(AP_IP);
+
+  // AP モードを起動（config.ap_password を使用）
+  if (!WiFi.softAP(AP_SSID, config.ap_password, AP_CHANNEL, 0, AP_MAX_CONNECTIONS)) {
+    Serial.println("エラー: AP 起動に失敗しました");
+    return;
+  }
+
+  Serial.println("AP モード起動成功");
+  Serial.print("SSID: ");
+  Serial.println(AP_SSID);
+  Serial.print("パスワード: ");
+  Serial.println(config.ap_password_set ? "カスタム設定済み" : "デフォルト");
+  Serial.print("チャンネル: ");
+  Serial.println(AP_CHANNEL);
+  Serial.print("最大接続数: ");
+  Serial.println(AP_MAX_CONNECTIONS);
+
+  Serial.println("--- AP モード設定完了 ---");
+  Serial.println();
+}
+```
+
+**検証方法**:
+
+- 保存された AP パスワードで接続できることを確認
+
+---
+
+### タスク 6.5 - Web UI の拡張（AP パスワード変更フォーム）
+
+- [x] handleRoot() に AP パスワード表示とフォームを追加
+
+**実装コード例**:
+
+```cpp
+void handleRoot() {
+  // ステータス情報取得
+  bool staConnected = WiFi.status() == WL_CONNECTED;
+  String staIP = staConnected ? WiFi.localIP().toString() : "未接続";
+  int apClients = WiFi.softAPgetStationNum();
+  uint32_t freeHeap = ESP.getFreeHeap();
+
+  // HTML 生成
+  String html = "<!DOCTYPE html><html><head>";
+  html += "<meta charset='UTF-8'>";
+  html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
+  html += "<title>XIAO ESP32C6 設定</title>";
+  html += "<style>";
+  html += "body{font-family:Arial,sans-serif;max-width:600px;margin:50px auto;padding:20px;background:#f5f5f5;}";
+  html += "h1{color:#333;border-bottom:3px solid #007bff;padding-bottom:10px;}";
+  html += "h2{color:#555;margin-top:30px;}";
+  html += ".status{background:#fff;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:20px 0;}";
+  html += ".status p{margin:10px 0;font-size:14px;}";
+  html += ".status strong{color:#007bff;}";
+  html += ".form-group{margin:15px 0;}";
+  html += "label{display:block;margin-bottom:5px;font-weight:bold;color:#555;}";
+  html += "input[type=text],input[type=password]{width:100%;padding:10px;box-sizing:border-box;border:1px solid #ddd;border-radius:4px;font-size:14px;}";
+  html += "input[type=text]:focus,input[type=password]:focus{outline:none;border-color:#007bff;}";
+  html += "button{background:#007bff;color:white;padding:12px 30px;border:none;border-radius:5px;cursor:pointer;font-size:16px;width:100%;margin-top:10px;}";
+  html += "button:hover{background:#0056b3;}";
+  html += ".connected{color:#28a745;}";
+  html += ".disconnected{color:#dc3545;}";
+  html += ".section{background:#fff;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:20px 0;}";
+  html += "</style>";
+  html += "</head><body>";
+
+  html += "<h1>XIAO ESP32C6 マイクロルーター</h1>";
+
+  // ステータス表示
+  html += "<div class='status'>";
+  html += "<h2>ステータス</h2>";
+  html += "<p>STA 接続: <strong class='" + String(staConnected ? "connected" : "disconnected") + "'>";
+  html += staConnected ? "接続済み" : "未接続";
+  html += "</strong></p>";
+  html += "<p>STA IP: <strong>" + staIP + "</strong></p>";
+  html += "<p>AP クライアント数: <strong>" + String(apClients) + " / " + String(AP_MAX_CONNECTIONS) + "</strong></p>";
+  html += "<p>AP パスワード: <strong>" + String(config.ap_password_set ? "カスタム設定済み" : "デフォルト") + "</strong></p>";
+  html += "<p>空きメモリ: <strong>" + String(freeHeap / 1024) + " KB</strong></p>";
+  html += "</div>";
+
+  // STA 設定フォーム
+  html += "<div class='section'>";
+  html += "<h2>Wi-Fi (STA) 設定</h2>";
+  html += "<p>接続したい既存の Wi-Fi ネットワークの情報を入力してください。</p>";
+  html += "<form method='POST' action='/save'>";
+  html += "<div class='form-group'>";
+  html += "<label>既存 Wi-Fi の SSID:</label>";
+  html += "<input type='text' name='ssid' placeholder='例: MyHomeWiFi' required maxlength='32'>";
+  html += "</div>";
+  html += "<div class='form-group'>";
+  html += "<label>パスワード:</label>";
+  html += "<input type='password' name='password' placeholder='8文字以上' required minlength='8' maxlength='64'>";
+  html += "</div>";
+  html += "<button type='submit'>保存して再起動</button>";
+  html += "</form>";
+  html += "</div>";
+
+  // AP パスワード設定フォーム (Phase 6)
+  html += "<div class='section'>";
+  html += "<h2>AP パスワード変更</h2>";
+  html += "<p>このルーターの Wi-Fi アクセスポイント (micro-router-esp32c6) のパスワードを変更できます。</p>";
+  html += "<form method='POST' action='/save_ap_password'>";
+  html += "<div class='form-group'>";
+  html += "<label>新しい AP パスワード:</label>";
+  html += "<input type='password' name='ap_password' placeholder='8文字以上' required minlength='8' maxlength='64'>";
+  html += "</div>";
+  html += "<button type='submit'>AP パスワードを保存して再起動</button>";
+  html += "</form>";
+  html += "</div>";
+
+  html += "</body></html>";
+
+  server.send(200, "text/html", html);
+}
+```
+
+**検証方法**:
+
+- Web UI で AP パスワード変更フォームが表示される
+- レスポンシブデザインがスマホでも動作する
+
+---
+
+### タスク 6.6 - AP パスワード保存エンドポイントの実装
+
+- [x] POST /save_ap_password エンドポイントを追加
+- [x] 入力検証（8〜64 文字）
+- [x] NVS に保存して再起動
+
+**実装コード例**:
+
+```cpp
+/**
+ * AP パスワード保存エンドポイント（POST /save_ap_password）
+ */
+void handleSaveAPPassword() {
+  // フォームデータ取得
+  String apPassword = server.arg("ap_password");
+
+  // 入力検証
+  if (apPassword.length() < 8 || apPassword.length() > 64) {
+    server.send(400, "text/html",
+                "<html><body><h1>エラー</h1><p>AP パスワードは 8〜64 文字で入力してください</p>"
+                "<a href='/'>戻る</a></body></html>");
+    return;
+  }
+
+  // AP パスワード保存
+  saveAPPassword(apPassword.c_str());
+
+  // 成功ページ
+  String html = "<!DOCTYPE html><html><head>";
+  html += "<meta charset='UTF-8'>";
+  html += "<meta http-equiv='refresh' content='" + String(CONFIG_SAVE_DELAY / 1000) + ";url=/'>";
+  html += "<style>";
+  html += "body{font-family:Arial,sans-serif;max-width:600px;margin:100px auto;padding:20px;text-align:center;}";
+  html += "h1{color:#28a745;}";
+  html += "p{font-size:18px;color:#555;}";
+  html += "</style>";
+  html += "</head><body>";
+  html += "<h1>✓ AP パスワードを保存しました</h1>";
+  html += "<p>" + String(CONFIG_SAVE_DELAY / 1000) + "秒後に再起動します...</p>";
+  html += "<p>再起動後、新しいパスワードで AP に接続してください。</p>";
+  html += "</body></html>";
+
+  server.send(200, "text/html", html);
+
+  Serial.println();
+  printSeparator("AP パスワード保存完了");
+  Serial.print(CONFIG_SAVE_DELAY / 1000);
+  Serial.println("秒後に再起動します");
+  printSeparator();
+
+  // 再起動
+  delay(CONFIG_SAVE_DELAY);
+  ESP.restart();
+}
+```
+
+**検証方法**:
+
+- Web UI から AP パスワードを変更
+- 再起動後、新しいパスワードで接続できることを確認
+
+---
+
+### タスク 6.7 - setup() での Web サーバーエンドポイント追加
+
+- [x] server.on() で /save_ap_password を登録
+
+**実装コード例**:
+
+```cpp
+void setup() {
+  // ... 既存のコード ...
+
+  // Web サーバーの起動
+  server.on("/", handleRoot);
+  server.on("/save", HTTP_POST, handleSave);
+  server.on("/save_ap_password", HTTP_POST, handleSaveAPPassword);  // Phase 6
+  server.begin();
+
+  Serial.println();
+  Serial.println("Web サーバー起動: http://192.168.4.1");
+
+  // ... 既存のコード ...
+}
+```
+
+**検証方法**:
+
+- コンパイルエラーが発生しないことを確認
+
+---
+
+### タスク 6.8 - 統合テスト
+
+- [x] 初回起動時、デフォルトパスワードで AP に接続できる
+- [x] Web UI で AP パスワードを変更できる
+- [x] 再起動後、新しいパスワードで AP に接続できる
+- [x] 古いパスワードでは接続できないことを確認
+- [x] 変更後も STA 接続が正常に動作する
+- [x] NAT/ルーティングが正常に動作する
+
+**テストシナリオ**:
+
+1. デバイスをリセット
+2. デフォルトパスワード "esp32c6router" で接続
+3. Web UI で AP パスワードを "newPassword123" に変更
+4. 再起動を待つ
+5. 新しいパスワードで接続できることを確認
+6. インターネットにアクセスできることを確認
+
+---
+
+## 完成チェックリスト（Phase 6 追加分）
+
+### Phase 6 機能
+
+- [x] AP パスワードが NVS に保存される
+- [x] 初回起動時、デフォルトパスワードが使用される
+- [x] Web UI で AP パスワードを変更できる
+- [x] 変更したパスワードで AP に接続できる
+- [x] パスワード入力検証が正しく動作する（8〜64 文字）
+- [x] 再起動後も設定が保持される
+
+---
+
+**最終更新**: 2025-11-10
