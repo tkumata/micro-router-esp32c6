@@ -3,9 +3,10 @@
  */
 
 #include "DNSFilterManager.h"
+#include "Config.h"
 
 DNSFilterManager::DNSFilterManager()
-  : enabled(false), upstreamDNS(8, 8, 8, 8) {
+  : enabled(false), upstreamDNS(DEFAULT_UPSTREAM_DNS) {
   stats = {0, 0, 0, 0};
 }
 
@@ -99,11 +100,11 @@ String DNSFilterManager::extractDomainFromDNSQuery(uint8_t* packet, size_t len) 
     uint8_t labelLen = *ptr++;
 
     // 圧縮ポインタチェック（上位2ビットが11の場合）
-    if ((labelLen & 0xC0) == 0xC0) {
+    if ((labelLen & DNS_COMPRESSION_POINTER_MASK) == DNS_COMPRESSION_POINTER_MASK) {
       break;  // 圧縮ポインタは未対応（通常のクエリでは不要）
     }
 
-    if (labelLen > 63 || ptr + labelLen > end) {
+    if (labelLen > DNS_LABEL_MAX_LENGTH || ptr + labelLen > end) {
       return "";  // 不正なラベル長
     }
 
@@ -136,8 +137,8 @@ void DNSFilterManager::sendBlockedResponse(uint8_t* query, size_t len,
   memcpy(response, query, len);
 
   // フラグを設定（応答、権威あり、エラー無し）
-  response[2] = 0x81;  // QR=1, Opcode=0, AA=0, TC=0, RD=1
-  response[3] = 0x80;  // RA=1, Z=0, RCODE=0
+  response[2] = DNS_RESPONSE_FLAGS_BYTE2;  // QR=1, Opcode=0, AA=0, TC=0, RD=1
+  response[3] = DNS_RESPONSE_FLAGS_BYTE3;  // RA=1, Z=0, RCODE=0
 
   // Answer Count = 1
   response[6] = 0x00;
@@ -146,33 +147,33 @@ void DNSFilterManager::sendBlockedResponse(uint8_t* query, size_t len,
   // Answer Section を追加
   size_t answerOffset = len;
 
-  // Name: 圧縮ポインタ (0xC00C = Query Section の先頭を指す)
-  response[answerOffset++] = 0xC0;
-  response[answerOffset++] = 0x0C;
+  // Name: 圧縮ポインタ (DNS_COMPRESSION_POINTER_QUERY = Query Section の先頭を指す)
+  response[answerOffset++] = (DNS_COMPRESSION_POINTER_QUERY >> 8) & 0xFF;  // 上位バイト
+  response[answerOffset++] = DNS_COMPRESSION_POINTER_QUERY & 0xFF;         // 下位バイト
 
-  // Type: A (0x0001)
-  response[answerOffset++] = 0x00;
-  response[answerOffset++] = 0x01;
+  // Type: A
+  response[answerOffset++] = (DNS_TYPE_A >> 8) & 0xFF;  // 上位バイト
+  response[answerOffset++] = DNS_TYPE_A & 0xFF;         // 下位バイト
 
-  // Class: IN (0x0001)
-  response[answerOffset++] = 0x00;
-  response[answerOffset++] = 0x01;
+  // Class: IN
+  response[answerOffset++] = (DNS_CLASS_IN >> 8) & 0xFF;  // 上位バイト
+  response[answerOffset++] = DNS_CLASS_IN & 0xFF;         // 下位バイト
 
-  // TTL: 300 秒
-  response[answerOffset++] = 0x00;
-  response[answerOffset++] = 0x00;
-  response[answerOffset++] = 0x01;
-  response[answerOffset++] = 0x2C;
+  // TTL
+  response[answerOffset++] = (DNS_TTL_SECONDS >> 24) & 0xFF;
+  response[answerOffset++] = (DNS_TTL_SECONDS >> 16) & 0xFF;
+  response[answerOffset++] = (DNS_TTL_SECONDS >> 8) & 0xFF;
+  response[answerOffset++] = DNS_TTL_SECONDS & 0xFF;
 
-  // Data Length: 4 bytes
+  // Data Length
   response[answerOffset++] = 0x00;
-  response[answerOffset++] = 0x04;
+  response[answerOffset++] = DNS_IPV4_ADDRESS_LENGTH;
 
-  // Data: 0.0.0.0
-  response[answerOffset++] = 0x00;
-  response[answerOffset++] = 0x00;
-  response[answerOffset++] = 0x00;
-  response[answerOffset++] = 0x00;
+  // Data: DNS_BLOCKED_IP (0.0.0.0)
+  response[answerOffset++] = DNS_BLOCKED_IP[0];
+  response[answerOffset++] = DNS_BLOCKED_IP[1];
+  response[answerOffset++] = DNS_BLOCKED_IP[2];
+  response[answerOffset++] = DNS_BLOCKED_IP[3];
 
   // クライアントに送信
   udp.beginPacket(clientIP, clientPort);
@@ -188,9 +189,9 @@ void DNSFilterManager::forwardToUpstream(uint8_t* query, size_t len,
   upstreamUdp.write(query, len);
   upstreamUdp.endPacket();
 
-  // 応答を待つ（タイムアウト: 2秒）
+  // 応答を待つ
   unsigned long startTime = millis();
-  while (millis() - startTime < 2000) {
+  while (millis() - startTime < DNS_FORWARD_TIMEOUT) {
     int packetSize = upstreamUdp.parsePacket();
     if (packetSize > 0) {
       uint8_t response[DNS_MAX_PACKET_SIZE];
@@ -204,7 +205,7 @@ void DNSFilterManager::forwardToUpstream(uint8_t* query, size_t len,
       upstreamUdp.stop();
       return;
     }
-    delay(10);
+    delay(DNS_POLLING_INTERVAL);
   }
 
   // タイムアウト
@@ -290,7 +291,7 @@ void DNSFilterManager::resetStats() {
 }
 
 bool DNSFilterManager::isValidDomain(const String& domain) {
-  if (domain.length() < 3 || domain.length() > 253) {
+  if (domain.length() < DOMAIN_NAME_MIN_LENGTH || domain.length() > DOMAIN_NAME_MAX_LENGTH) {
     return false;
   }
 

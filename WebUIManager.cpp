@@ -99,7 +99,7 @@ void handleRoot() {
   html += "<p>STA IP: <strong>" + staIP + "</strong></p>";
   html += "<p>AP クライアント数: <strong>" + String(apClients) + " / " + String(AP_MAX_CONNECTIONS) + "</strong></p>";
   html += "<p>AP パスワード: <strong>" + String(config.ap_password_set ? "カスタム設定済み" : "デフォルト") + "</strong></p>";
-  html += "<p>空きメモリ: <strong>" + String(freeHeap / 1024) + " KB</strong></p>";
+  html += "<p>空きメモリ: <strong>" + String(freeHeap / BYTES_TO_KB_DIVISOR) + " KB</strong></p>";
   html += "</div>";
 
   // STA 設定フォーム
@@ -109,11 +109,11 @@ void handleRoot() {
   html += "<form method='POST' action='/save'>";
   html += "<div class='form-group'>";
   html += "<label>既存 Wi-Fi の SSID:</label>";
-  html += "<input type='text' name='ssid' placeholder='例: MyHomeWiFi' required maxlength='32'>";
+  html += "<input type='text' name='ssid' placeholder='例: MyHomeWiFi' required maxlength='" + String(WIFI_SSID_MAX_LENGTH) + "'>";
   html += "</div>";
   html += "<div class='form-group'>";
   html += "<label>パスワード:</label>";
-  html += "<input type='password' name='password' placeholder='8文字以上' required minlength='8' maxlength='64'>";
+  html += "<input type='password' name='password' placeholder='8文字以上' required minlength='" + String(WIFI_PASSWORD_MIN_LENGTH) + "' maxlength='" + String(WIFI_PASSWORD_MAX_LENGTH) + "'>";
   html += "</div>";
   html += "<button type='submit'>保存して再起動</button>";
   html += "</form>";
@@ -126,7 +126,7 @@ void handleRoot() {
   html += "<form method='POST' action='/save_ap_password'>";
   html += "<div class='form-group'>";
   html += "<label>新しい AP パスワード:</label>";
-  html += "<input type='password' name='ap_password' placeholder='8文字以上' required minlength='8' maxlength='64'>";
+  html += "<input type='password' name='ap_password' placeholder='8文字以上' required minlength='" + String(WIFI_PASSWORD_MIN_LENGTH) + "' maxlength='" + String(WIFI_PASSWORD_MAX_LENGTH) + "'>";
   html += "</div>";
   html += "<button type='submit'>AP パスワードを保存して再起動</button>";
   html += "</form>";
@@ -134,7 +134,7 @@ void handleRoot() {
 
   html += "</body></html>";
 
-  server.send(200, "text/html", html);
+  server.send(HTTP_STATUS_OK, "text/html", html);
 }
 
 /**
@@ -146,16 +146,16 @@ void handleSave() {
   String password = server.arg("password");
 
   // 入力検証
-  if (ssid.length() == 0 || ssid.length() > 32) {
-    server.send(400, "text/html",
-                "<html><body><h1>エラー</h1><p>SSID は 1〜32 文字で入力してください</p>"
+  if (ssid.length() == 0 || ssid.length() > WIFI_SSID_MAX_LENGTH) {
+    server.send(HTTP_STATUS_BAD_REQUEST, "text/html",
+                "<html><body><h1>エラー</h1><p>SSID は 1〜" + String(WIFI_SSID_MAX_LENGTH) + " 文字で入力してください</p>"
                 "<a href='/'>戻る</a></body></html>");
     return;
   }
 
-  if (password.length() < 8 || password.length() > 64) {
-    server.send(400, "text/html",
-                "<html><body><h1>エラー</h1><p>パスワードは 8〜64 文字で入力してください</p>"
+  if (password.length() < WIFI_PASSWORD_MIN_LENGTH || password.length() > WIFI_PASSWORD_MAX_LENGTH) {
+    server.send(HTTP_STATUS_BAD_REQUEST, "text/html",
+                "<html><body><h1>エラー</h1><p>パスワードは " + String(WIFI_PASSWORD_MIN_LENGTH) + "〜" + String(WIFI_PASSWORD_MAX_LENGTH) + " 文字で入力してください</p>"
                 "<a href='/'>戻る</a></body></html>");
     return;
   }
@@ -166,7 +166,7 @@ void handleSave() {
   // 成功ページ
   String html = "<!DOCTYPE html><html><head>";
   html += "<meta charset='UTF-8'>";
-  html += "<meta http-equiv='refresh' content='" + String(CONFIG_SAVE_DELAY / 1000) + ";url=/'>";
+  html += "<meta http-equiv='refresh' content='" + String(CONFIG_SAVE_DELAY / MILLISECONDS_TO_SECONDS_DIVISOR) + ";url=/'>";
   html += "<style>";
   html += "body{font-family:Arial,sans-serif;max-width:600px;margin:100px auto;padding:20px;text-align:center;}";
   html += "h1{color:#28a745;}";
@@ -174,17 +174,17 @@ void handleSave() {
   html += "</style>";
   html += "</head><body>";
   html += "<h1>✓ 設定を保存しました</h1>";
-  html += "<p>" + String(CONFIG_SAVE_DELAY / 1000) + "秒後に再起動します...</p>";
+  html += "<p>" + String(CONFIG_SAVE_DELAY / MILLISECONDS_TO_SECONDS_DIVISOR) + "秒後に再起動します...</p>";
   html += "<p>再起動後、設定した Wi-Fi に接続します。</p>";
   html += "</body></html>";
 
-  server.send(200, "text/html", html);
+  server.send(HTTP_STATUS_OK, "text/html", html);
 
   Serial.println();
   Serial.println("========================================");
   Serial.println("設定保存完了");
   Serial.println("========================================");
-  Serial.print(CONFIG_SAVE_DELAY / 1000);
+  Serial.print(CONFIG_SAVE_DELAY / MILLISECONDS_TO_SECONDS_DIVISOR);
   Serial.println("秒後に再起動します");
   Serial.println("========================================");
 
@@ -201,9 +201,9 @@ void handleSaveAPPassword() {
   String apPassword = server.arg("ap_password");
 
   // 入力検証
-  if (apPassword.length() < 8 || apPassword.length() > 64) {
-    server.send(400, "text/html",
-                "<html><body><h1>エラー</h1><p>AP パスワードは 8〜64 文字で入力してください</p>"
+  if (apPassword.length() < WIFI_PASSWORD_MIN_LENGTH || apPassword.length() > WIFI_PASSWORD_MAX_LENGTH) {
+    server.send(HTTP_STATUS_BAD_REQUEST, "text/html",
+                "<html><body><h1>エラー</h1><p>AP パスワードは " + String(WIFI_PASSWORD_MIN_LENGTH) + "〜" + String(WIFI_PASSWORD_MAX_LENGTH) + " 文字で入力してください</p>"
                 "<a href='/'>戻る</a></body></html>");
     return;
   }
@@ -214,7 +214,7 @@ void handleSaveAPPassword() {
   // 成功ページ
   String html = "<!DOCTYPE html><html><head>";
   html += "<meta charset='UTF-8'>";
-  html += "<meta http-equiv='refresh' content='" + String(CONFIG_SAVE_DELAY / 1000) + ";url=/'>";
+  html += "<meta http-equiv='refresh' content='" + String(CONFIG_SAVE_DELAY / MILLISECONDS_TO_SECONDS_DIVISOR) + ";url=/'>";
   html += "<style>";
   html += "body{font-family:Arial,sans-serif;max-width:600px;margin:100px auto;padding:20px;text-align:center;}";
   html += "h1{color:#28a745;}";
@@ -222,17 +222,17 @@ void handleSaveAPPassword() {
   html += "</style>";
   html += "</head><body>";
   html += "<h1>✓ AP パスワードを保存しました</h1>";
-  html += "<p>" + String(CONFIG_SAVE_DELAY / 1000) + "秒後に再起動します...</p>";
+  html += "<p>" + String(CONFIG_SAVE_DELAY / MILLISECONDS_TO_SECONDS_DIVISOR) + "秒後に再起動します...</p>";
   html += "<p>再起動後、新しいパスワードで AP に接続してください。</p>";
   html += "</body></html>";
 
-  server.send(200, "text/html", html);
+  server.send(HTTP_STATUS_OK, "text/html", html);
 
   Serial.println();
   Serial.println("========================================");
   Serial.println("AP パスワード保存完了");
   Serial.println("========================================");
-  Serial.print(CONFIG_SAVE_DELAY / 1000);
+  Serial.print(CONFIG_SAVE_DELAY / MILLISECONDS_TO_SECONDS_DIVISOR);
   Serial.println("秒後に再起動します");
   Serial.println("========================================");
 
@@ -291,12 +291,12 @@ void handleDNSFilter() {
   html += "<li>総クエリ数: <strong>" + String(stats.totalQueries) + "</strong></li>";
   html += "<li>ブロック数: <strong>" + String(stats.blockedQueries) + "</strong>";
   if (stats.totalQueries > 0) {
-    html += " (" + String(stats.blockedQueries * 100 / stats.totalQueries) + "%)";
+    html += " (" + String(stats.blockedQueries * PERCENTAGE_MULTIPLIER / stats.totalQueries) + "%)";
   }
   html += "</li>";
   html += "<li>許可数: <strong>" + String(stats.allowedQueries) + "</strong>";
   if (stats.totalQueries > 0) {
-    html += " (" + String(stats.allowedQueries * 100 / stats.totalQueries) + "%)";
+    html += " (" + String(stats.allowedQueries * PERCENTAGE_MULTIPLIER / stats.totalQueries) + "%)";
   }
   html += "</li>";
   html += "<li>ブロックリスト登録数: <strong>" + String(blocklistCount) + " ドメイン</strong></li>";
@@ -318,7 +318,7 @@ void handleDNSFilter() {
 
   html += "</body></html>";
 
-  server.send(200, "text/html", html);
+  server.send(HTTP_STATUS_OK, "text/html", html);
 }
 
 /**
@@ -338,7 +338,7 @@ void handleDNSFilterToggle() {
 
   // リダイレクト
   server.sendHeader("Location", "/dns-filter");
-  server.send(303);
+  server.send(HTTP_STATUS_SEE_OTHER);
 }
 
 /**
@@ -384,7 +384,7 @@ void handleUploadBlocklist() {
  */
 void handleDownloadBlocklist() {
   if (!LittleFS.exists("/blocklist.txt")) {
-    server.send(404, "text/plain", "ブロックリストが見つかりません");
+    server.send(HTTP_STATUS_NOT_FOUND, "text/plain", "ブロックリストが見つかりません");
     return;
   }
 
@@ -394,6 +394,6 @@ void handleDownloadBlocklist() {
     server.streamFile(file, "text/plain");
     file.close();
   } else {
-    server.send(500, "text/plain", "ブロックリストを開けませんでした");
+    server.send(HTTP_STATUS_INTERNAL_ERROR, "text/plain", "ブロックリストを開けませんでした");
   }
 }

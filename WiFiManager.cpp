@@ -34,7 +34,7 @@ void setupAP() {
 
   // AP モードを起動（config.ap_password を使用）
   // WiFi.softAP(ssid, password, channel, ssid_hidden, max_connection)
-  if (!WiFi.softAP(AP_SSID, config.ap_password, AP_CHANNEL, 0, AP_MAX_CONNECTIONS)) {
+  if (!WiFi.softAP(AP_SSID, config.ap_password, AP_CHANNEL, WIFI_SSID_HIDDEN, AP_MAX_CONNECTIONS)) {
     Serial.println("エラー: AP 起動に失敗しました");
     return;
   }
@@ -88,7 +88,7 @@ void setupSTA() {
   while (WiFi.status() != WL_CONNECTED &&
          millis() - startAttemptTime < STA_CONNECTION_TIMEOUT) {
     Serial.print(".");
-    delay(500);
+    delay(WIFI_CONNECTION_CHECK_DELAY);
   }
   Serial.println();
 
