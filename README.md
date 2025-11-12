@@ -2,7 +2,7 @@
 
 ## 1. 概要
 
-Waveshare XIAO ESP32-C6 (RISC-V) を使用したミニマルな Wi-Fi ルーターの実装です。
+Seeed Studio XIAO ESP32-C6 (RISC-V) を使用したミニマルな Wi-Fi ルーターの実装です。
 
 ![image](./docs/IMG_0517.jpeg)
 
@@ -46,7 +46,7 @@ Waveshare XIAO ESP32-C6 (RISC-V) を使用したミニマルな Wi-Fi ルータ�
 
 ## 2. 必要なハードウェア
 
-- Waveshare XIAO ESP32-C6 (RISC-V CPU)
+- Seeed Studio XIAO ESP32-C6 (RISC-V CPU)
 - USB-C to A 変換器 (場合によっては)
 
 ### 注意点
@@ -74,7 +74,7 @@ curl -O https://raw.githubusercontent.com/tofukko/filter/master/Adblock_Plus_lis
 python3 tools/convert_adblock_to_domains.py Adblock_Plus_list.txt domain.txt
 ```
 
-このスクリプトは Adblock Plus 形式のフィルタリストから、ESP32C6 が扱えるシンプルなドメインリスト（1行1ドメイン形式）に変換します。
+このスクリプトは Adblock Plus 形式のフィルタリストから、ESP32C6 が扱えるシンプルなドメインリスト（1 行 1 ドメイン形式）に変換します。
 
 3. **Web UI からアップロード**
 

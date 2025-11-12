@@ -1,10 +1,10 @@
-# XIAO ESP32C6 マイクロ Wi-Fi ルーター - 要件定義書
+# Seeed Studio XIAO ESP32C6 マイクロ Wi-Fi ルーター - 要件定義書
 
 ## 1. プロジェクト概要
 
 ### 1.1 目的
 
-XIAO ESP32C6 を使用した極小 Wi-Fi ルーターの実装。既存の Wi-Fi ネットワークに接続しながら、独自のアクセスポイントを提供し、NAT とルーティング機能により接続デバイスをインターネットに接続する。
+Seeed Studio XIAO ESP32C6 を使用した極小 Wi-Fi ルーターの実装。既存の Wi-Fi ネットワークに接続しながら、独自のアクセスポイントを提供し、NAT とルーティング機能により接続デバイスをインターネットに接続する。
 
 ### 1.2 想定用途
 
@@ -33,7 +33,7 @@ XIAO ESP32C6 を使用した極小 Wi-Fi ルーターの実装。既存の Wi-Fi
   - WiFi.h (ESP32 標準)
   - WebServer.h (ESP32 標準)
   - Preferences.h (ESP32 標準)
-  - esp_netif.h (ESP-IDF netif API - NAT機能用)
+  - esp_netif.h (ESP-IDF netif API - NAT 機能用)
   - **重要**: lwIP NAT の低レベル関数（`ip_napt_enable`等）は ESP32C6 環境でロックエラーが発生するため使用不可。ESP-IDF の高レベル API（`esp_netif_napt_enable()`）を使用する必要がある。
 
 ## 3. 機能要件
