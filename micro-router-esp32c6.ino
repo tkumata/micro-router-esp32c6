@@ -1,5 +1,5 @@
 /*
- * XIAO ESP32C6 Micro Wi-Fi Router - Phase 7 リファクタリング版
+ * XIAO ESP32C6 Micro Wi-Fi Router - Phase 8 DNS フィルタリング版
  *
  * このスケッチは ESP32C6 を Wi-Fi ルーターとして動作させます。
  *
@@ -11,6 +11,7 @@
  * - 初回起動と設定済み起動の自動判定
  * - NAT/NAPT によるパケット転送
  * - DNS フォワーディング
+ * - DNS フィルタリング（広告ブロック）
  * - 自動再接続機能
  * - メモリ監視
  *
@@ -22,6 +23,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Preferences.h>
+#include <LittleFS.h>   // ファイルシステム（Phase 8）
 #include <esp_netif.h>  // ESP-IDF netif API（NAT機能用）
 
 #include "Config.h"
@@ -30,6 +32,7 @@
 #include "WiFiManager.h"
 #include "NATManager.h"
 #include "WebUIManager.h"
+#include "DNSFilterManager.h"  // Phase 8
 #include "Utils.h"
 
 // ===== 定数の実体定義 =====
@@ -55,6 +58,7 @@ const char* PREF_KEY_STA_PASSWORD = "sta_password";
 const char* PREF_KEY_AP_PASSWORD = "ap_password";
 const char* PREF_KEY_CONFIGURED = "configured";
 const char* PREF_KEY_AP_PASSWORD_SET = "ap_pw_set";
+const char* PREF_KEY_DNS_FILTER_ENABLED = "dns_filter_en";  // Phase 8
 
 const char* DEFAULT_AP_PASSWORD = "esp32c6router";
 
@@ -62,6 +66,7 @@ const char* DEFAULT_AP_PASSWORD = "esp32c6router";
 WebServer server(80);
 Preferences preferences;
 WifiConfig config;
+DNSFilterManager dnsFilter;  // Phase 8
 
 // ===== 状態管理変数 =====
 unsigned long lastReconnectAttempt = 0;  // 最後の再接続試行時刻
@@ -81,6 +86,13 @@ void setup() {
   Serial.println();
   printSeparator("XIAO ESP32C6 マイクロ Wi-Fi ルーター");
   Serial.println();
+
+  // LittleFS の初期化（Phase 8）
+  if (!LittleFS.begin(true)) {
+    Serial.println("LittleFS のマウントに失敗しました");
+  } else {
+    Serial.println("LittleFS を正常にマウントしました");
+  }
 
   // WiFi イベントハンドラの登録
   WiFi.onEvent(onWiFiEvent);
@@ -115,6 +127,21 @@ void setup() {
   // Web サーバーの起動
   setupWebServer();
 
+  // DNS フィルタの初期化（Phase 8）
+  if (dnsFilter.begin()) {
+    Serial.println("DNS フィルタを正常に起動しました");
+
+    // DNS フィルタ設定の読み込み
+    preferences.begin(PREF_NAMESPACE, true);
+    bool dnsFilterEnabled = preferences.getBool(PREF_KEY_DNS_FILTER_ENABLED, false);
+    preferences.end();
+
+    dnsFilter.setEnabled(dnsFilterEnabled);
+    Serial.printf("DNS フィルタ設定: %s\n", dnsFilterEnabled ? "有効" : "無効");
+  } else {
+    Serial.println("DNS フィルタの起動に失敗しました");
+  }
+
   Serial.println();
   printSeparator("セットアップ完了");
   Serial.println();
@@ -125,6 +152,9 @@ void setup() {
 void loop() {
   // NAT 有効化リクエストの処理
   processNATEnableRequest();
+
+  // DNS フィルタの処理（Phase 8）
+  dnsFilter.handleClient();
 
   // Web サーバーのリクエスト処理
   server.handleClient();

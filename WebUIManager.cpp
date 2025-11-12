@@ -7,9 +7,16 @@
 #include "WebUIManager.h"
 #include "Config.h"
 #include "ConfigManager.h"
+#include "DNSFilterManager.h"  // Phase 8
 #include <WiFi.h>
 #include <Arduino.h>
 #include <ESP.h>
+#include <LittleFS.h>  // Phase 8
+#include <Preferences.h>
+
+// グローバル変数の extern 宣言
+extern DNSFilterManager dnsFilter;  // Phase 8
+extern Preferences preferences;
 
 /**
  * Web サーバーのセットアップ
@@ -18,6 +25,23 @@ void setupWebServer() {
   server.on("/", handleRoot);
   server.on("/save", HTTP_POST, handleSave);
   server.on("/save_ap_password", HTTP_POST, handleSaveAPPassword);
+
+  // DNS フィルタエンドポイント（Phase 8）
+  server.on("/dns-filter", handleDNSFilter);
+  server.on("/dns-filter-toggle", HTTP_POST, handleDNSFilterToggle);
+  server.on("/download-blocklist", HTTP_GET, handleDownloadBlocklist);
+  server.on("/upload-blocklist", HTTP_POST,
+    []() {
+      server.send(200, "text/html",
+        "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body>"
+        "<h2>アップロード成功</h2>"
+        "<p>ブロックリストが更新されました。</p>"
+        "<a href='/dns-filter'>戻る</a>"
+        "</body></html>");
+    },
+    handleUploadBlocklist
+  );
+
   server.begin();
 
   Serial.println();
@@ -59,6 +83,12 @@ void handleRoot() {
   html += "</head><body>";
 
   html += "<h1>XIAO ESP32C6 マイクロルーター</h1>";
+
+  // ナビゲーション（Phase 8）
+  html += "<div style='margin:20px 0;'>";
+  html += "<a href='/dns-filter' style='color:#007bff;text-decoration:none;margin-right:15px;'>DNS フィルタリング設定</a>";
+  html += "<a href='/' style='color:#007bff;text-decoration:none;'>トップページ</a>";
+  html += "</div>";
 
   // ステータス表示
   html += "<div class='status'>";
@@ -209,4 +239,161 @@ void handleSaveAPPassword() {
   // 再起動
   delay(CONFIG_SAVE_DELAY);
   ESP.restart();
+}
+
+// ========================================
+// Phase 8: DNS フィルタ関連ハンドラ
+// ========================================
+
+/**
+ * DNS フィルタページ（GET /dns-filter）
+ */
+void handleDNSFilter() {
+  DNSStats stats = dnsFilter.getStats();
+  int blocklistCount = dnsFilter.getBlocklistCount();
+  bool enabled = dnsFilter.isEnabled();
+
+  String html = "<!DOCTYPE html><html><head>";
+  html += "<meta charset='UTF-8'>";
+  html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
+  html += "<title>DNS フィルタリング</title>";
+  html += "<style>";
+  html += "body{font-family:Arial,sans-serif;max-width:800px;margin:50px auto;padding:20px;background:#f5f5f5;}";
+  html += "h1{color:#333;border-bottom:3px solid #007bff;padding-bottom:10px;}";
+  html += "h2{color:#555;margin-top:30px;}";
+  html += ".status{background:#fff;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:20px 0;}";
+  html += ".form-group{margin:15px 0;}";
+  html += "label{display:block;margin-bottom:5px;font-weight:bold;}";
+  html += "button{background:#007bff;color:white;padding:10px 20px;border:none;border-radius:5px;cursor:pointer;}";
+  html += "button:hover{background:#0056b3;}";
+  html += "</style>";
+  html += "</head><body>";
+
+  html += "<h1>DNS フィルタリング</h1>";
+  html += "<p><a href='/' style='color:#007bff;'>← トップページに戻る</a></p>";
+
+  // 有効/無効切り替え
+  html += "<div class='status'>";
+  html += "<h2>DNS フィルタ設定</h2>";
+  html += "<form method='POST' action='/dns-filter-toggle'>";
+  html += "<label>";
+  html += "<input type='checkbox' name='enabled' " + String(enabled ? "checked" : "") + "> ";
+  html += "DNS フィルタを有効にする";
+  html += "</label><br><br>";
+  html += "<button type='submit'>保存</button>";
+  html += "</form>";
+  html += "</div>";
+
+  // 統計情報
+  html += "<div class='status'>";
+  html += "<h2>統計情報</h2>";
+  html += "<ul>";
+  html += "<li>総クエリ数: <strong>" + String(stats.totalQueries) + "</strong></li>";
+  html += "<li>ブロック数: <strong>" + String(stats.blockedQueries) + "</strong>";
+  if (stats.totalQueries > 0) {
+    html += " (" + String(stats.blockedQueries * 100 / stats.totalQueries) + "%)";
+  }
+  html += "</li>";
+  html += "<li>許可数: <strong>" + String(stats.allowedQueries) + "</strong>";
+  if (stats.totalQueries > 0) {
+    html += " (" + String(stats.allowedQueries * 100 / stats.totalQueries) + "%)";
+  }
+  html += "</li>";
+  html += "<li>ブロックリスト登録数: <strong>" + String(blocklistCount) + " ドメイン</strong></li>";
+  html += "</ul>";
+  html += "</div>";
+
+  // ブロックリストアップロード
+  html += "<div class='status'>";
+  html += "<h2>ブロックリスト管理</h2>";
+  html += "<form method='POST' action='/upload-blocklist' enctype='multipart/form-data'>";
+  html += "<label>domain.txt をアップロード:</label><br>";
+  html += "<input type='file' name='blocklist' accept='.txt' required><br><br>";
+  html += "<button type='submit'>アップロード</button>";
+  html += "</form>";
+  html += "<p style='margin-top:15px;'>";
+  html += "<a href='/download-blocklist' style='color:#007bff;'>現在のリストをダウンロード</a>";
+  html += "</p>";
+  html += "</div>";
+
+  html += "</body></html>";
+
+  server.send(200, "text/html", html);
+}
+
+/**
+ * DNS フィルタ ON/OFF 切り替え（POST /dns-filter-toggle）
+ */
+void handleDNSFilterToggle() {
+  bool enabled = server.hasArg("enabled");
+
+  // 設定を保存
+  preferences.begin(PREF_NAMESPACE, false);
+  preferences.putBool(PREF_KEY_DNS_FILTER_ENABLED, enabled);
+  preferences.end();
+
+  dnsFilter.setEnabled(enabled);
+
+  Serial.printf("DNS フィルタ設定変更: %s\n", enabled ? "有効" : "無効");
+
+  // リダイレクト
+  server.sendHeader("Location", "/dns-filter");
+  server.send(303);
+}
+
+/**
+ * ブロックリストアップロード処理（POST /upload-blocklist）
+ */
+void handleUploadBlocklist() {
+  static File uploadFile;
+  HTTPUpload& upload = server.upload();
+
+  if (upload.status == UPLOAD_FILE_START) {
+    Serial.printf("アップロード開始: %s\n", upload.filename.c_str());
+    uploadFile = LittleFS.open("/blocklist.txt.tmp", "w");
+    if (!uploadFile) {
+      Serial.println("一時ファイルのオープンに失敗");
+    }
+  }
+  else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (uploadFile) {
+      uploadFile.write(upload.buf, upload.currentSize);
+    }
+  }
+  else if (upload.status == UPLOAD_FILE_END) {
+    if (uploadFile) {
+      uploadFile.close();
+      Serial.printf("アップロード完了: %d バイト\n", upload.totalSize);
+
+      // バックアップして置換
+      LittleFS.remove("/blocklist.txt.bak");
+      if (LittleFS.exists("/blocklist.txt")) {
+        LittleFS.rename("/blocklist.txt", "/blocklist.txt.bak");
+      }
+      LittleFS.rename("/blocklist.txt.tmp", "/blocklist.txt");
+
+      // リロード
+      dnsFilter.reloadBlocklist();
+      Serial.println("ブロックリストを更新しました");
+    }
+  }
+}
+
+/**
+ * ブロックリストダウンロード（GET /download-blocklist）
+ */
+void handleDownloadBlocklist() {
+  if (!LittleFS.exists("/blocklist.txt")) {
+    server.send(404, "text/plain", "ブロックリストが見つかりません");
+    return;
+  }
+
+  File file = LittleFS.open("/blocklist.txt", "r");
+  if (file) {
+    server.sendHeader("Content-Disposition", "attachment; filename=blocklist.txt");
+    server.streamFile(file, "text/plain");
+    file.close();
+  } else {
+    server.send(500, "text/plain", "ブロックリストを開けませんでした");
+  }
 }

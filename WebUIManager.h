@@ -20,4 +20,10 @@ void handleRoot();
 void handleSave();
 void handleSaveAPPassword();
 
+// DNS フィルタハンドラ（Phase 8）
+void handleDNSFilter();
+void handleDNSFilterToggle();
+void handleUploadBlocklist();
+void handleDownloadBlocklist();
+
 #endif // WEBUI_MANAGER_H

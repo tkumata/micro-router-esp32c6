@@ -11,6 +11,7 @@
 | Phase 5  | 1 日     | 最適化とテスト              | ✅ 完了 |
 | Phase 6  | 1 日     | AP パスワード永続化         | ✅ 完了 |
 | Phase 7  | 2-3 時間 | コードのリファクタリング    | ✅ 完了 |
+| Phase 8  | 2-3 日   | DNS フィルタリング機能の実装 | 🚧 進行中 |
 
 ---
 
@@ -1351,4 +1352,806 @@ void setup() {
 
 ---
 
-**最終更新**: 2025-11-10
+## Phase 8: DNS フィルタリング機能の実装
+
+### 概要
+
+Phase 7 のリファクタリング完了後、DNS フィルタリング機能を実装します。この機能により、ドメインレベルでの広告ブロック（AdGuard Home 相当）が可能になります。
+
+**目的**: クライアントからの DNS クエリを ESP32C6 でインターセプトし、ブロックリストに登録されたドメインへのアクセスを 0.0.0.0 に応答することでブロックする。
+
+**実装期間**: 2〜3 日
+
+**成果物**:
+
+- DNSFilterManager.h/.cpp モジュール
+- DNS Proxy サーバー（UDP Port 53）
+- ブロックリスト管理（SPIFFS/LittleFS）
+- Web UI での統計表示とブロックリストアップロード機能
+- Preferences での設定保存
+
+---
+
+### タスク 8.1 - DNSFilterManager モジュールの作成
+
+- [ ] DNSFilterManager.h のクラス定義を作成
+- [ ] DNSFilterManager.cpp の基本実装を作成
+- [ ] 必要な定数とデータ構造を定義
+
+**実装内容**:
+
+```cpp
+// DNSFilterManager.h
+#ifndef DNS_FILTER_MANAGER_H
+#define DNS_FILTER_MANAGER_H
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#include <LittleFS.h>
+#include <vector>
+
+#define DNS_PORT 53
+#define DNS_MAX_PACKET_SIZE 512
+#define DNS_HEADER_SIZE 12
+#define MAX_BLOCKLIST_SIZE 5000
+
+struct DNSStats {
+  uint32_t totalQueries;
+  uint32_t blockedQueries;
+  uint32_t allowedQueries;
+  uint32_t errorQueries;
+};
+
+class DNSFilterManager {
+public:
+  DNSFilterManager();
+  ~DNSFilterManager();
+
+  bool begin();
+  void end();
+  void handleClient();
+
+  void setEnabled(bool enabled);
+  bool isEnabled() const;
+
+  bool loadBlocklistFromFile(const char* filepath = "/blocklist.txt");
+  bool reloadBlocklist();
+  void clearBlocklist();
+  int getBlocklistCount() const;
+
+  DNSStats getStats() const;
+  void resetStats();
+
+private:
+  WiFiUDP udp;
+  bool enabled;
+  std::vector<String> blocklist;
+  DNSStats stats;
+  IPAddress upstreamDNS;
+
+  String extractDomainFromDNSQuery(uint8_t* packet, size_t len);
+  bool isBlocked(const String& domain);
+  void sendBlockedResponse(uint8_t* query, size_t len, IPAddress clientIP, uint16_t clientPort);
+  void forwardToUpstream(uint8_t* query, size_t len, IPAddress clientIP, uint16_t clientPort);
+  bool isValidDomain(const String& domain);
+};
+
+#endif
+```
+
+**検証方法**:
+
+- コンパイルエラーが発生しないことを確認
+- クラスの基本構造が正しく定義されていることを確認
+
+---
+
+### タスク 8.2 - DNS Proxy サーバーの実装
+
+- [ ] UDP Port 53 でのリッスン機能を実装
+- [ ] DNS クエリパケットの受信処理を実装
+- [ ] DNS パケットからドメイン名を抽出する機能を実装
+- [ ] 上流 DNS サーバー（8.8.8.8）への転送機能を実装
+
+**実装コード例**:
+
+```cpp
+// DNSFilterManager::begin()
+bool DNSFilterManager::begin() {
+  Serial.println("DNSFilterManager: Starting DNS Proxy Server...");
+
+  if (!udp.begin(DNS_PORT)) {
+    Serial.println("DNSFilterManager: Failed to start UDP on port 53");
+    return false;
+  }
+
+  Serial.printf("DNSFilterManager: Listening on port %d\n", DNS_PORT);
+  loadBlocklistFromFile();
+  enabled = true;
+  return true;
+}
+
+// DNSFilterManager::handleClient()
+void DNSFilterManager::handleClient() {
+  if (!enabled) return;
+
+  int packetSize = udp.parsePacket();
+  if (packetSize == 0) return;
+
+  IPAddress clientIP = udp.remoteIP();
+  uint16_t clientPort = udp.remotePort();
+
+  uint8_t packet[DNS_MAX_PACKET_SIZE];
+  int len = udp.read(packet, DNS_MAX_PACKET_SIZE);
+
+  if (len < DNS_HEADER_SIZE) {
+    stats.errorQueries++;
+    return;
+  }
+
+  stats.totalQueries++;
+
+  String domain = extractDomainFromDNSQuery(packet, len);
+  if (domain.length() == 0) {
+    stats.errorQueries++;
+    return;
+  }
+
+  if (isBlocked(domain)) {
+    Serial.printf("DNSFilterManager: BLOCKED %s\n", domain.c_str());
+    stats.blockedQueries++;
+    sendBlockedResponse(packet, len, clientIP, clientPort);
+  } else {
+    Serial.printf("DNSFilterManager: ALLOWED %s\n", domain.c_str());
+    stats.allowedQueries++;
+    forwardToUpstream(packet, len, clientIP, clientPort);
+  }
+}
+```
+
+**検証方法**:
+
+- シリアルモニタで DNS クエリの受信が確認できる
+- ドメイン名が正しく抽出されることを確認
+
+---
+
+### タスク 8.3 - ブロックリスト管理機能の実装
+
+- [ ] LittleFS の初期化処理を実装
+- [ ] ブロックリストファイル（/blocklist.txt）の読み込み機能を実装
+- [ ] メモリ内データ構造（std::vector）へのロード処理を実装
+- [ ] ドメイン照合アルゴリズムを実装
+- [ ] サブドメインマッチング機能を実装
+
+**実装コード例**:
+
+```cpp
+bool DNSFilterManager::loadBlocklistFromFile(const char* filepath) {
+  if (!LittleFS.exists(filepath)) {
+    Serial.printf("DNSFilterManager: Blocklist file not found: %s\n", filepath);
+    return false;
+  }
+
+  File file = LittleFS.open(filepath, "r");
+  if (!file) {
+    Serial.println("DNSFilterManager: Failed to open blocklist");
+    return false;
+  }
+
+  clearBlocklist();
+  int count = 0;
+
+  while (file.available() && count < MAX_BLOCKLIST_SIZE) {
+    String line = file.readStringUntil('\n');
+    line.trim();
+
+    // 空行とコメント行をスキップ
+    if (line.length() == 0 || line.startsWith("#")) {
+      continue;
+    }
+
+    // hosts 形式の場合は IP 部分を削除
+    if (line.startsWith("0.0.0.0 ") || line.startsWith("127.0.0.1 ")) {
+      int spaceIdx = line.indexOf(' ');
+      if (spaceIdx > 0) {
+        line = line.substring(spaceIdx + 1);
+        line.trim();
+      }
+    }
+
+    if (isValidDomain(line)) {
+      blocklist.push_back(line.toLowerCase());
+      count++;
+    }
+  }
+
+  file.close();
+  Serial.printf("DNSFilterManager: Loaded %d domains from %s\n", count, filepath);
+  return true;
+}
+
+bool DNSFilterManager::isBlocked(const String& domain) {
+  for (const String& blocked : blocklist) {
+    if (domain == blocked || domain.endsWith("." + blocked)) {
+      return true;
+    }
+  }
+  return false;
+}
+```
+
+**検証方法**:
+
+- サンプル blocklist.txt をアップロードして読み込まれることを確認
+- ブロックリストのドメイン数が正しくカウントされることを確認
+
+---
+
+### タスク 8.4 - DNS フィルタリングロジックの実装
+
+- [ ] ブロック時の DNS 応答生成（0.0.0.0 を返す）を実装
+- [ ] 許可時の上流 DNS への転送処理を実装
+- [ ] 統計情報の記録機能を実装
+- [ ] タイムアウト処理を実装
+
+**実装コード例**:
+
+```cpp
+void DNSFilterManager::sendBlockedResponse(uint8_t* query, size_t len,
+                                            IPAddress clientIP, uint16_t clientPort) {
+  uint8_t response[DNS_MAX_PACKET_SIZE];
+  memcpy(response, query, len);
+
+  // フラグを設定（応答、権威あり）
+  response[2] = 0x81;
+  response[3] = 0x80;
+
+  // Answer Count = 1
+  response[6] = 0x00;
+  response[7] = 0x01;
+
+  size_t answerOffset = len;
+
+  // Name: 圧縮ポインタ (0xC00C)
+  response[answerOffset++] = 0xC0;
+  response[answerOffset++] = 0x0C;
+
+  // Type: A (0x0001)
+  response[answerOffset++] = 0x00;
+  response[answerOffset++] = 0x01;
+
+  // Class: IN (0x0001)
+  response[answerOffset++] = 0x00;
+  response[answerOffset++] = 0x01;
+
+  // TTL: 300 秒
+  response[answerOffset++] = 0x00;
+  response[answerOffset++] = 0x00;
+  response[answerOffset++] = 0x01;
+  response[answerOffset++] = 0x2C;
+
+  // Data Length: 4 bytes
+  response[answerOffset++] = 0x00;
+  response[answerOffset++] = 0x04;
+
+  // Data: 0.0.0.0
+  response[answerOffset++] = 0x00;
+  response[answerOffset++] = 0x00;
+  response[answerOffset++] = 0x00;
+  response[answerOffset++] = 0x00;
+
+  udp.beginPacket(clientIP, clientPort);
+  udp.write(response, answerOffset);
+  udp.endPacket();
+}
+
+void DNSFilterManager::forwardToUpstream(uint8_t* query, size_t len,
+                                          IPAddress clientIP, uint16_t clientPort) {
+  WiFiUDP upstreamUdp;
+  upstreamUdp.beginPacket(upstreamDNS, DNS_PORT);
+  upstreamUdp.write(query, len);
+  upstreamUdp.endPacket();
+
+  // 応答を待つ（タイムアウト: 2秒）
+  unsigned long startTime = millis();
+  while (millis() - startTime < 2000) {
+    int packetSize = upstreamUdp.parsePacket();
+    if (packetSize > 0) {
+      uint8_t response[DNS_MAX_PACKET_SIZE];
+      int responseLen = upstreamUdp.read(response, DNS_MAX_PACKET_SIZE);
+
+      udp.beginPacket(clientIP, clientPort);
+      udp.write(response, responseLen);
+      udp.endPacket();
+
+      upstreamUdp.stop();
+      return;
+    }
+    delay(10);
+  }
+
+  Serial.println("DNSFilterManager: Upstream DNS timeout");
+  upstreamUdp.stop();
+}
+```
+
+**検証方法**:
+
+- ブロック対象ドメインに nslookup すると 0.0.0.0 が返ることを確認
+- 許可対象ドメインに nslookup すると正しい IP が返ることを確認
+
+---
+
+### タスク 8.5 - Web UI 統合
+
+- [ ] `/dns-filter` エンドポイントを追加
+- [ ] DNS フィルタの ON/OFF 切り替えフォームを実装
+- [ ] 統計情報の表示を実装
+- [ ] 最近ブロックしたドメインの表示を実装
+- [ ] カスタムブロックリスト追加フォームを実装（将来機能）
+
+**実装コード例**:
+
+```cpp
+void handleDNSFilter() {
+  DNSStats stats = dnsFilter.getStats();
+  int blocklistCount = dnsFilter.getBlocklistCount();
+  bool enabled = dnsFilter.isEnabled();
+
+  String html = "<!DOCTYPE html><html><head>";
+  html += "<meta charset='UTF-8'>";
+  html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
+  html += "<title>DNS フィルタリング</title>";
+  html += "<style>";
+  html += "body{font-family:Arial,sans-serif;max-width:800px;margin:50px auto;padding:20px;}";
+  html += "h1{color:#333;border-bottom:3px solid #007bff;padding-bottom:10px;}";
+  html += "h2{color:#555;margin-top:30px;}";
+  html += ".status{background:#fff;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:20px 0;}";
+  html += ".form-group{margin:15px 0;}";
+  html += "label{display:block;margin-bottom:5px;font-weight:bold;}";
+  html += "button{background:#007bff;color:white;padding:10px 20px;border:none;border-radius:5px;cursor:pointer;}";
+  html += "</style>";
+  html += "</head><body>";
+
+  html += "<h1>DNS フィルタリング</h1>";
+  html += "<p><a href='/'>← トップページに戻る</a></p>";
+
+  // 有効/無効切り替え
+  html += "<div class='status'>";
+  html += "<h2>DNS フィルタ設定</h2>";
+  html += "<form method='POST' action='/dns-filter-toggle'>";
+  html += "<label>";
+  html += "<input type='checkbox' name='enabled' " + String(enabled ? "checked" : "") + "> ";
+  html += "DNS フィルタを有効にする";
+  html += "</label><br>";
+  html += "<button type='submit'>保存</button>";
+  html += "</form>";
+  html += "</div>";
+
+  // 統計情報
+  html += "<div class='status'>";
+  html += "<h2>統計情報</h2>";
+  html += "<ul>";
+  html += "<li>総クエリ数: <strong>" + String(stats.totalQueries) + "</strong></li>";
+  html += "<li>ブロック数: <strong>" + String(stats.blockedQueries) + "</strong>";
+  if (stats.totalQueries > 0) {
+    html += " (" + String(stats.blockedQueries * 100 / stats.totalQueries) + "%)";
+  }
+  html += "</li>";
+  html += "<li>許可数: <strong>" + String(stats.allowedQueries) + "</strong>";
+  if (stats.totalQueries > 0) {
+    html += " (" + String(stats.allowedQueries * 100 / stats.totalQueries) + "%)";
+  }
+  html += "</li>";
+  html += "<li>ブロックリスト登録数: <strong>" + String(blocklistCount) + " ドメイン</strong></li>";
+  html += "</ul>";
+  html += "</div>";
+
+  html += "</body></html>";
+
+  server.send(200, "text/html", html);
+}
+```
+
+**検証方法**:
+
+- http://192.168.4.1/dns-filter にアクセスして統計情報が表示されることを確認
+- ON/OFF 切り替えが正常に動作することを確認
+
+---
+
+### タスク 8.6 - Preferences 統合
+
+- [ ] DNS フィルタ有効/無効フラグの保存機能を実装
+- [ ] 起動時の設定読み込み機能を実装
+- [ ] カスタムブロックリストの保存機能を実装（将来機能）
+
+**実装コード例**:
+
+```cpp
+// 設定保存
+void saveDNSFilterConfig(bool enabled) {
+  preferences.begin("wifi-config", false);
+  preferences.putBool("dns_filter_enabled", enabled);
+  preferences.end();
+
+  Serial.printf("DNS Filter config saved: %s\n", enabled ? "Enabled" : "Disabled");
+}
+
+// 設定読み込み
+void loadDNSFilterConfig() {
+  preferences.begin("wifi-config", true);
+  bool enabled = preferences.getBool("dns_filter_enabled", false);
+  preferences.end();
+
+  dnsFilter.setEnabled(enabled);
+  Serial.printf("DNS Filter loaded: %s\n", enabled ? "Enabled" : "Disabled");
+}
+```
+
+**検証方法**:
+
+- 設定を保存して再起動後も保持されることを確認
+
+---
+
+### タスク 8.7 - DHCP サーバーの調整
+
+- [ ] DHCP オプションで ESP32C6 自身を DNS サーバーとして広告
+- [ ] AP クライアントが ESP32C6 を DNS サーバーとして使用するよう設定
+
+**実装コード例**:
+
+```cpp
+void setupAP() {
+  // ... 既存の AP 設定 ...
+
+  // DHCP オプション: DNS Server = 192.168.4.1
+  tcpip_adapter_ip_info_t ipInfo;
+  tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_AP, &ipInfo);
+
+  uint32_t dnsServer = ipInfo.ip.addr; // 192.168.4.1
+  dhcps_offer_t dhcps_dns_value = OFFER_DNS;
+  dhcps_set_option_info(6, &dnsServer, sizeof(dnsServer));
+
+  Serial.println("DHCP: ESP32C6 を DNS サーバーとして設定");
+}
+```
+
+**検証方法**:
+
+- AP に接続したデバイスの DNS サーバーが 192.168.4.1 になっていることを確認
+- `ipconfig /all` (Windows) または `cat /etc/resolv.conf` (Linux) で確認
+
+---
+
+### タスク 8.8 - ブロックリストアップロード機能の実装
+
+- [ ] multipart/form-data のハンドラを実装
+- [ ] ストリーム処理によるファイル保存を実装
+- [ ] フォーマット検証ロジックを実装
+- [ ] バックアップ & ロールバック機能を実装
+- [ ] Web UI にアップロードフォームを追加
+- [ ] ダウンロードエンドポイント（/download-blocklist）を実装
+- [ ] DNSFilterManager::reloadBlocklist() を実装
+
+**実装コード例**:
+
+```cpp
+// POST /upload-blocklist
+server.on("/upload-blocklist", HTTP_POST,
+  []() {
+    server.send(200, "text/html",
+      "<h2>アップロード成功</h2>"
+      "<p>ブロックリストが更新されました。</p>"
+      "<a href='/dns-filter'>戻る</a>"
+    );
+  },
+  []() {
+    static File uploadFile;
+    HTTPUpload& upload = server.upload();
+
+    if (upload.status == UPLOAD_FILE_START) {
+      Serial.printf("Upload Start: %s\n", upload.filename.c_str());
+      uploadFile = LittleFS.open("/blocklist.txt.tmp", "w");
+      if (!uploadFile) {
+        Serial.println("Failed to open temp file for writing");
+      }
+    }
+    else if (upload.status == UPLOAD_FILE_WRITE) {
+      if (uploadFile) {
+        uploadFile.write(upload.buf, upload.currentSize);
+      }
+    }
+    else if (upload.status == UPLOAD_FILE_END) {
+      if (uploadFile) {
+        uploadFile.close();
+        Serial.printf("Upload End: %d bytes\n", upload.totalSize);
+
+        if (validateBlocklist("/blocklist.txt.tmp")) {
+          LittleFS.remove("/blocklist.txt.bak");
+          if (LittleFS.exists("/blocklist.txt")) {
+            LittleFS.rename("/blocklist.txt", "/blocklist.txt.bak");
+          }
+          LittleFS.rename("/blocklist.txt.tmp", "/blocklist.txt");
+
+          dnsFilter.reloadBlocklist();
+          Serial.println("Blocklist updated successfully");
+        } else {
+          LittleFS.remove("/blocklist.txt.tmp");
+          Serial.println("Invalid blocklist format");
+        }
+      }
+    }
+  }
+);
+
+// GET /download-blocklist
+server.on("/download-blocklist", HTTP_GET, []() {
+  if (!LittleFS.exists("/blocklist.txt")) {
+    server.send(404, "text/plain", "Blocklist not found");
+    return;
+  }
+
+  File file = LittleFS.open("/blocklist.txt", "r");
+  if (file) {
+    server.sendHeader("Content-Disposition", "attachment; filename=blocklist.txt");
+    server.streamFile(file, "text/plain");
+    file.close();
+  } else {
+    server.send(500, "text/plain", "Failed to open blocklist");
+  }
+});
+```
+
+**検証方法**:
+
+- Web UI から domain.txt をアップロードできることを確認
+- アップロード後、ブロックリストが更新されることを確認
+- ダウンロード機能で現在のリストを取得できることを確認
+
+---
+
+### タスク 8.9 - ブロックリスト変換スクリプトの作成
+
+- [ ] Python スクリプト（convert_adblock_to_domains.py）を作成
+- [ ] Adblock Plus 形式のパース機能を実装
+- [ ] ドメイン抽出ロジックを実装
+- [ ] 重複排除機能を実装
+- [ ] バリデーション機能を実装
+
+**成果物**: `tools/convert_adblock_to_domains.py`
+
+**検証方法**:
+
+```bash
+# 豆腐フィルタをダウンロード
+curl -O https://raw.githubusercontent.com/tofukko/filter/master/Adblock_Plus_list.txt
+
+# ドメインリストに変換
+python3 tools/convert_adblock_to_domains.py Adblock_Plus_list.txt domain.txt
+
+# 結果を確認
+head -20 domain.txt
+wc -l domain.txt
+```
+
+---
+
+### タスク 8.10 - メインプログラムへの統合
+
+- [ ] micro-router-esp32c6.ino に DNSFilterManager をインクルード
+- [ ] グローバル変数として DNSFilterManager インスタンスを作成
+- [ ] setup() で dnsFilter.begin() を呼び出し
+- [ ] loop() で dnsFilter.handleClient() を呼び出し
+- [ ] LittleFS の初期化処理を追加
+
+**実装コード例**:
+
+```cpp
+#include "DNSFilterManager.h"
+
+DNSFilterManager dnsFilter;
+
+void setup() {
+  Serial.begin(115200);
+
+  // LittleFS 初期化
+  if (!LittleFS.begin(true)) {
+    Serial.println("LittleFS Mount Failed");
+  } else {
+    Serial.println("LittleFS Mounted Successfully");
+  }
+
+  // ... 既存の WiFi, Web サーバー初期化 ...
+
+  // DNS フィルタの初期化
+  if (dnsFilter.begin()) {
+    Serial.println("DNS Filter started successfully");
+    loadDNSFilterConfig();
+  } else {
+    Serial.println("DNS Filter failed to start");
+  }
+}
+
+void loop() {
+  // ... 既存の処理 ...
+
+  // DNS クエリを処理
+  dnsFilter.handleClient();
+
+  // ... Web サーバーの処理など ...
+}
+```
+
+**検証方法**:
+
+- コンパイルエラーが発生しないことを確認
+- シリアルモニタで DNS Filter の起動を確認
+
+---
+
+### タスク 8.11 - 統合テストとデバッグ
+
+- [ ] AP に接続したデバイスから nslookup でブロックリストのドメインをクエリ
+- [ ] ブロック対象が 0.0.0.0 を返すことを確認
+- [ ] 許可対象が正しい IP を返すことを確認
+- [ ] 統計情報が正しく記録されることを確認
+- [ ] Web UI からブロックリストをアップロードして動作を確認
+- [ ] メモリ使用量が安全範囲内（300KB 以上の空き）であることを確認
+
+**テストシナリオ**:
+
+```bash
+# テストクライアント（ESP32C6 の AP に接続した PC）から実行
+
+# 1. ブロック対象ドメインのクエリ
+nslookup ads.google.com
+
+# 期待結果: Address: 0.0.0.0
+
+# 2. 許可対象ドメインのクエリ
+nslookup www.google.com
+
+# 期待結果: Address: 142.250.xxx.xxx（正しい IP）
+
+# 3. ブラウザでの確認
+curl -I http://ads.google.com
+# 期待結果: Connection refused
+
+curl -I http://www.google.com
+# 期待結果: HTTP/1.1 200 OK
+```
+
+**検証方法**:
+
+- すべてのテストケースが成功することを確認
+- Serial Monitor で DNS クエリのログを確認
+- Web UI で統計情報を確認
+
+---
+
+### タスク 8.12 - ドキュメントの更新
+
+- [ ] README.md に DNS フィルタリング機能の説明を追加
+- [ ] 使用方法の記載を追加
+- [ ] ブロックリストの準備方法を追加
+- [ ] トラブルシューティングガイドを追加
+
+**追加内容**:
+
+1. DNS フィルタリング機能の概要
+2. ブロックリストの準備方法（Python スクリプトの使用）
+3. Web UI でのアップロード方法
+4. 統計情報の見方
+5. 既知の問題と制限事項
+
+---
+
+## Phase 8 完成チェックリスト
+
+### 基本機能
+
+- [ ] DNSFilterManager モジュールが正しく動作する
+- [ ] DNS クエリをインターセプトできる
+- [ ] ブロックリストのドメインが正しくブロックされる（0.0.0.0 を返す）
+- [ ] 許可対象のドメインが正しく解決される
+- [ ] 上流 DNS への転送が正常に動作する
+- [ ] サブドメインマッチングが正しく動作する
+
+### Web UI
+
+- [ ] /dns-filter ページが表示される
+- [ ] 統計情報が正しく表示される
+- [ ] DNS フィルタの ON/OFF 切り替えが動作する
+- [ ] ブロックリストのアップロードが動作する
+- [ ] ブロックリストのダウンロードが動作する
+
+### ストレージ
+
+- [ ] ブロックリストが LittleFS に保存される
+- [ ] 再起動後もブロックリストが保持される
+- [ ] バックアップ & ロールバック機能が動作する
+
+### 設定管理
+
+- [ ] DNS フィルタの有効/無効が Preferences に保存される
+- [ ] 再起動後も設定が保持される
+
+### パフォーマンス
+
+- [ ] DNS クエリの応答時間が許容範囲内（< 100ms）
+- [ ] メモリ使用量が安全範囲内（300KB 以上の空き）
+- [ ] 1000 エントリのブロックリストで正常に動作する
+
+### ツール
+
+- [ ] Python 変換スクリプトが正しく動作する
+- [ ] 豆腐フィルタから domain.txt を生成できる
+
+---
+
+## 既知の制限事項（Phase 8）
+
+- ブロック粒度はドメイン単位のみ（URL パスのブロックは不可）
+- ワイルドカードマッチングは未対応（将来機能）
+- カテゴリ別フィルタは未対応（将来機能）
+- Web UI に認証機能なし（AP 接続が前提）
+- ブロックリストの最大サイズは 5,000 ドメイン
+
+---
+
+## トラブルシューティング（Phase 8）
+
+### 問題 1: DNS クエリがブロックされない
+
+**原因**: クライアントが ESP32C6 を DNS サーバーとして使用していない
+
+**確認事項**:
+
+- DHCP サーバーが ESP32C6 (192.168.4.1) を DNS サーバーとして広告しているか
+- クライアントの DNS 設定が 192.168.4.1 になっているか
+
+**解決策**:
+
+- クライアントを再接続して DHCP から設定を取得
+- 手動で DNS サーバーを 192.168.4.1 に設定
+
+### 問題 2: ブロックリストが読み込めない
+
+**原因**: LittleFS が初期化されていない、またはファイルが存在しない
+
+**確認事項**:
+
+- LittleFS.begin() が成功しているか
+- /blocklist.txt が存在するか
+
+**解決策**:
+
+- Web UI からブロックリストをアップロード
+- シリアルモニタでエラーメッセージを確認
+
+### 問題 3: メモリ不足でクラッシュする
+
+**原因**: ブロックリストが大きすぎる
+
+**解決策**:
+
+- ブロックリストのサイズを削減（推奨: 500〜1,000 ドメイン）
+- MAX_BLOCKLIST_SIZE を調整
+
+### 問題 4: 正常なサイトがブロックされる
+
+**原因**: ブロックリストに誤ったエントリが含まれている
+
+**解決策**:
+
+- ブロックリストを確認して修正
+- 統計情報でブロックされたドメインを確認
+- 必要に応じてホワイトリスト機能を追加（将来機能）
+
+---
+
+**最終更新**: 2025-11-12

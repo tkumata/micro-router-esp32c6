@@ -41,4 +41,7 @@ extern const char* PREF_KEY_AP_PASSWORD_SET;
 // ===== デフォルト値 =====
 extern const char* DEFAULT_AP_PASSWORD;
 
+// ===== DNS フィルタリング設定 (Phase 8) =====
+extern const char* PREF_KEY_DNS_FILTER_ENABLED;
+
 #endif // CONFIG_H

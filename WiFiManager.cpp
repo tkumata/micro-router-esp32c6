@@ -8,6 +8,7 @@
 #include "Config.h"
 #include "ConfigManager.h"
 #include <Arduino.h>
+#include <esp_netif.h>
 
 // NATManager からの extern 宣言
 extern bool natEnabled;
@@ -47,6 +48,21 @@ void setupAP() {
   Serial.println(AP_CHANNEL);
   Serial.print("最大接続数: ");
   Serial.println(AP_MAX_CONNECTIONS);
+
+  // DHCP サーバーで DNS サーバーとして ESP32C6 自身を広告（Phase 8）
+  esp_netif_t* ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+  if (ap_netif != NULL) {
+    // DNS サーバーとして自分自身（192.168.4.1）を設定
+    esp_netif_dns_info_t dns_info;
+    dns_info.ip.u_addr.ip4.addr = ESP_IP4TOADDR(192, 168, 4, 1);
+    dns_info.ip.type = ESP_IPADDR_TYPE_V4;
+
+    esp_netif_set_dns_info(ap_netif, ESP_NETIF_DNS_MAIN, &dns_info);
+
+    Serial.println("DHCP: ESP32C6 を DNS サーバーとして設定（192.168.4.1）");
+  } else {
+    Serial.println("警告: AP netif の取得に失敗しました");
+  }
 
   Serial.println("--- AP モード設定完了 ---");
   Serial.println();
