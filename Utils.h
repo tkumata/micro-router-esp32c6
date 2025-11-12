@@ -61,7 +61,7 @@ inline void printPeriodicStatus() {
     uint32_t minFreeHeap = ESP.getMinFreeHeap();
 
     Serial.print("[");
-    Serial.print(now / 1000);
+    Serial.print(now / MILLISECONDS_TO_SECONDS_DIVISOR);
     Serial.print("s] AP クライアント: ");
     Serial.print(clientCount);
     Serial.print("/");
@@ -74,9 +74,9 @@ inline void printPeriodicStatus() {
       Serial.print(")");
     }
     Serial.print(" | メモリ: ");
-    Serial.print(freeHeap / 1024);
+    Serial.print(freeHeap / BYTES_TO_KB_DIVISOR);
     Serial.print(" KB (最小: ");
-    Serial.print(minFreeHeap / 1024);
+    Serial.print(minFreeHeap / BYTES_TO_KB_DIVISOR);
     Serial.print(" KB)");
 
     // メモリ不足の警告

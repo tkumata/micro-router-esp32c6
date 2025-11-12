@@ -46,7 +46,7 @@ void enableNAT() {
 
   esp_netif_t* ap_netif = NULL;
 
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < sizeof(ap_keys) / sizeof(ap_keys[0]); i++) {
     ap_netif = esp_netif_get_handle_from_ifkey(ap_keys[i]);
     if (ap_netif != NULL) {
       Serial.print("AP netif をキー '");

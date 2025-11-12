@@ -62,8 +62,61 @@ const char* PREF_KEY_DNS_FILTER_ENABLED = "dns_filter_en";  // Phase 8
 
 const char* DEFAULT_AP_PASSWORD = "esp32c6router";
 
+// ===== Web サーバー設定 =====
+const uint16_t WEB_SERVER_PORT = 80;
+
+// ===== シリアル通信設定 =====
+const unsigned long SERIAL_STABILIZE_DELAY = 1000;
+
+// ===== 文字列長制限 =====
+const size_t WIFI_SSID_MAX_LENGTH = 32;
+const size_t WIFI_PASSWORD_MIN_LENGTH = 8;
+const size_t WIFI_PASSWORD_MAX_LENGTH = 64;
+const size_t WIFI_SSID_BUFFER_SIZE = 33;        // 32 + 1 (null終端)
+const size_t WIFI_PASSWORD_BUFFER_SIZE = 65;    // 64 + 1 (null終端)
+
+// ===== WiFi 接続設定 =====
+const uint8_t WIFI_SSID_HIDDEN = 0;
+const unsigned long WIFI_CONNECTION_CHECK_DELAY = 500;
+
+// ===== HTTP ステータスコード =====
+const uint16_t HTTP_STATUS_OK = 200;
+const uint16_t HTTP_STATUS_SEE_OTHER = 303;
+const uint16_t HTTP_STATUS_BAD_REQUEST = 400;
+const uint16_t HTTP_STATUS_NOT_FOUND = 404;
+const uint16_t HTTP_STATUS_INTERNAL_ERROR = 500;
+
+// ===== 単位換算定数 =====
+const uint32_t BYTES_TO_KB_DIVISOR = 1024;
+const uint32_t MILLISECONDS_TO_SECONDS_DIVISOR = 1000;
+const uint8_t PERCENTAGE_MULTIPLIER = 100;
+
+// ===== DNS 設定 =====
+const IPAddress DEFAULT_UPSTREAM_DNS(8, 8, 8, 8);
+const uint16_t DNS_FORWARD_TIMEOUT = 2000;
+const unsigned long DNS_POLLING_INTERVAL = 10;
+
+// ===== DNS パケット定数 =====
+const uint8_t DNS_COMPRESSION_POINTER_MASK = 0xC0;
+const uint8_t DNS_LABEL_MAX_LENGTH = 63;
+const uint8_t DNS_RESPONSE_FLAGS_BYTE2 = 0x81;
+const uint8_t DNS_RESPONSE_FLAGS_BYTE3 = 0x80;
+const uint16_t DNS_COMPRESSION_POINTER_QUERY = 0xC00C;
+const uint16_t DNS_TYPE_A = 0x0001;
+const uint16_t DNS_CLASS_IN = 0x0001;
+const uint32_t DNS_TTL_SECONDS = 300;
+const uint8_t DNS_IPV4_ADDRESS_LENGTH = 4;
+const IPAddress DNS_BLOCKED_IP(0, 0, 0, 0);
+
+// ===== ドメイン名検証定数 =====
+const size_t DOMAIN_NAME_MIN_LENGTH = 3;
+const size_t DOMAIN_NAME_MAX_LENGTH = 253;
+
+// ===== ブロックリストメモリ設定 =====
+const size_t BLOCKLIST_BUFFER_SIZE = 131072;  // 128KB（5000ドメイン×平均20文字×1.3倍の余裕）
+
 // ===== グローバル変数 =====
-WebServer server(80);
+WebServer server(WEB_SERVER_PORT);
 Preferences preferences;
 WifiConfig config;
 DNSFilterManager dnsFilter;  // Phase 8
@@ -81,7 +134,7 @@ bool needEnableNAT = false;              // NAT 有効化リクエストフラ�
 void setup() {
   // シリアル通信の初期化
   Serial.begin(115200);
-  delay(1000);  // シリアルの安定化を待つ
+  delay(SERIAL_STABILIZE_DELAY);  // シリアルの安定化を待つ
 
   Serial.println();
   printSeparator("XIAO ESP32C6 マイクロ Wi-Fi ルーター");

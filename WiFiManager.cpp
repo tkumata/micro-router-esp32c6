@@ -34,7 +34,7 @@ void setupAP() {
 
   // AP モードを起動（config.ap_password を使用）
   // WiFi.softAP(ssid, password, channel, ssid_hidden, max_connection)
-  if (!WiFi.softAP(AP_SSID, config.ap_password, AP_CHANNEL, 0, AP_MAX_CONNECTIONS)) {
+  if (!WiFi.softAP(AP_SSID, config.ap_password, AP_CHANNEL, WIFI_SSID_HIDDEN, AP_MAX_CONNECTIONS)) {
     Serial.println("エラー: AP 起動に失敗しました");
     return;
   }
@@ -54,12 +54,12 @@ void setupAP() {
   if (ap_netif != NULL) {
     // DNS サーバーとして自分自身（192.168.4.1）を設定
     esp_netif_dns_info_t dns_info;
-    dns_info.ip.u_addr.ip4.addr = ESP_IP4TOADDR(192, 168, 4, 1);
+    dns_info.ip.u_addr.ip4.addr = static_cast<uint32_t>(AP_IP);
     dns_info.ip.type = ESP_IPADDR_TYPE_V4;
 
     esp_netif_set_dns_info(ap_netif, ESP_NETIF_DNS_MAIN, &dns_info);
 
-    Serial.println("DHCP: ESP32C6 を DNS サーバーとして設定（192.168.4.1）");
+    Serial.printf("DHCP: ESP32C6 を DNS サーバーとして設定（%s）\n", AP_IP.toString().c_str());
   } else {
     Serial.println("警告: AP netif の取得に失敗しました");
   }
@@ -88,7 +88,7 @@ void setupSTA() {
   while (WiFi.status() != WL_CONNECTED &&
          millis() - startAttemptTime < STA_CONNECTION_TIMEOUT) {
     Serial.print(".");
-    delay(500);
+    delay(WIFI_CONNECTION_CHECK_DELAY);
   }
   Serial.println();
 

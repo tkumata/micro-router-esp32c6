@@ -22,9 +22,9 @@ void loadConfig() {
   config.configured = preferences.getBool(PREF_KEY_CONFIGURED, false);
   config.ap_password_set = preferences.getBool(PREF_KEY_AP_PASSWORD_SET, false);
 
-  ssid.toCharArray(config.sta_ssid, 33);
-  password.toCharArray(config.sta_password, 65);
-  apPassword.toCharArray(config.ap_password, 65);
+  ssid.toCharArray(config.sta_ssid, WIFI_SSID_BUFFER_SIZE);
+  password.toCharArray(config.sta_password, WIFI_PASSWORD_BUFFER_SIZE);
+  apPassword.toCharArray(config.ap_password, WIFI_PASSWORD_BUFFER_SIZE);
 
   preferences.end();
 

@@ -20,6 +20,11 @@
 #define DNS_HEADER_SIZE 12
 #define MAX_BLOCKLIST_SIZE 5000
 
+// DNS 応答パケット定数
+#define DNS_ANSWER_COUNT_HIGH_BYTE 0x00
+#define DNS_ANSWER_COUNT_LOW_BYTE 0x01
+#define DNS_DATA_LENGTH_HIGH_BYTE 0x00
+
 // ===== 統計情報構造体 =====
 struct DNSStats {
   uint32_t totalQueries;     // 総クエリ数
@@ -63,7 +68,13 @@ public:
 private:
   WiFiUDP udp;                      // DNS サーバー用 UDP
   bool enabled;                     // フィルタ有効フラグ
-  std::vector<String> blocklist;    // ブロックリスト
+
+  // メモリ効率の良いブロックリスト実装
+  char* blocklistBuffer;            // 文字列プール（単一バッファ）
+  size_t blocklistBufferSize;       // バッファの総サイズ
+  size_t blocklistBufferUsed;       // 使用済みサイズ
+  std::vector<const char*> blocklist;  // ドメイン文字列へのポインタリスト
+
   DNSStats stats;                   // 統計情報
   IPAddress upstreamDNS;            // 上流 DNS サーバー
 
