@@ -59,7 +59,7 @@ void setupAP() {
 
     esp_netif_set_dns_info(ap_netif, ESP_NETIF_DNS_MAIN, &dns_info);
 
-    Serial.println("DHCP: ESP32C6 を DNS サーバーとして設定（192.168.4.1）");
+    Serial.printf("DHCP: ESP32C6 を DNS サーバーとして設定（%s）\n", AP_IP.toString().c_str());
   } else {
     Serial.println("警告: AP netif の取得に失敗しました");
   }

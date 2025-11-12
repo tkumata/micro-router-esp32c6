@@ -94,4 +94,7 @@ extern const IPAddress DNS_BLOCKED_IP;               // ブロック時の返信
 extern const size_t DOMAIN_NAME_MIN_LENGTH;          // ドメイン名最小長
 extern const size_t DOMAIN_NAME_MAX_LENGTH;          // ドメイン名最大長（253）
 
+// ===== ブロックリストメモリ設定 =====
+extern const size_t BLOCKLIST_BUFFER_SIZE;           // ブロックリスト文字列プールサイズ（バイト）
+
 #endif // CONFIG_H

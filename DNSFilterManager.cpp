@@ -6,12 +6,20 @@
 #include "Config.h"
 
 DNSFilterManager::DNSFilterManager()
-  : enabled(false), upstreamDNS(DEFAULT_UPSTREAM_DNS) {
+  : enabled(false),
+    blocklistBuffer(nullptr),
+    blocklistBufferSize(0),
+    blocklistBufferUsed(0),
+    upstreamDNS(DEFAULT_UPSTREAM_DNS) {
   stats = {0, 0, 0, 0};
 }
 
 DNSFilterManager::~DNSFilterManager() {
   end();
+  if (blocklistBuffer) {
+    free(blocklistBuffer);
+    blocklistBuffer = nullptr;
+  }
 }
 
 bool DNSFilterManager::begin() {
@@ -122,9 +130,20 @@ String DNSFilterManager::extractDomainFromDNSQuery(uint8_t* packet, size_t len) 
 }
 
 bool DNSFilterManager::isBlocked(const String& domain) {
-  for (const String& blocked : blocklist) {
-    if (domain == blocked || domain.endsWith("." + blocked)) {
+  for (const char* blocked : blocklist) {
+    size_t blockedLen = strlen(blocked);
+    size_t domainLen = domain.length();
+
+    // 完全一致チェック
+    if (domain.equals(blocked)) {
       return true;
+    }
+
+    // サブドメイン一致チェック (例: example.com が ads.example.com にマッチ)
+    if (domainLen > blockedLen && domain.charAt(domainLen - blockedLen - 1) == '.') {
+      if (domain.endsWith(blocked)) {
+        return true;
+      }
     }
   }
   return false;
@@ -141,8 +160,8 @@ void DNSFilterManager::sendBlockedResponse(uint8_t* query, size_t len,
   response[3] = DNS_RESPONSE_FLAGS_BYTE3;  // RA=1, Z=0, RCODE=0
 
   // Answer Count = 1
-  response[6] = 0x00;
-  response[7] = 0x01;
+  response[6] = DNS_ANSWER_COUNT_HIGH_BYTE;
+  response[7] = DNS_ANSWER_COUNT_LOW_BYTE;
 
   // Answer Section を追加
   size_t answerOffset = len;
@@ -166,7 +185,7 @@ void DNSFilterManager::sendBlockedResponse(uint8_t* query, size_t len,
   response[answerOffset++] = DNS_TTL_SECONDS & 0xFF;
 
   // Data Length
-  response[answerOffset++] = 0x00;
+  response[answerOffset++] = DNS_DATA_LENGTH_HIGH_BYTE;
   response[answerOffset++] = DNS_IPV4_ADDRESS_LENGTH;
 
   // Data: DNS_BLOCKED_IP (0.0.0.0)
@@ -227,6 +246,18 @@ bool DNSFilterManager::loadBlocklistFromFile(const char* filepath) {
 
   clearBlocklist();
 
+  // バッファ割り当て
+  if (!blocklistBuffer) {
+    blocklistBuffer = (char*)malloc(BLOCKLIST_BUFFER_SIZE);
+    if (!blocklistBuffer) {
+      Serial.println("DNSFilterManager: メモリ割り当てに失敗しました");
+      file.close();
+      return false;
+    }
+    blocklistBufferSize = BLOCKLIST_BUFFER_SIZE;
+    blocklistBufferUsed = 0;
+  }
+
   int count = 0;
   while (file.available() && count < MAX_BLOCKLIST_SIZE) {
     String line = file.readStringUntil('\n');
@@ -249,13 +280,29 @@ bool DNSFilterManager::loadBlocklistFromFile(const char* filepath) {
     // ブロックリストに追加
     if (isValidDomain(line)) {
       line.toLowerCase();
-      blocklist.push_back(line);
+
+      // 文字列プールに格納するための空き容量チェック
+      size_t domainLen = line.length() + 1;  // null終端を含む
+      if (blocklistBufferUsed + domainLen > blocklistBufferSize) {
+        Serial.println("DNSFilterManager: バッファが不足しています");
+        break;
+      }
+
+      // 文字列プールにコピー
+      char* domainPtr = blocklistBuffer + blocklistBufferUsed;
+      strcpy(domainPtr, line.c_str());
+      blocklist.push_back(domainPtr);
+
+      blocklistBufferUsed += domainLen;
       count++;
     }
   }
 
   file.close();
   Serial.printf("DNSFilterManager: %s から %d ドメインを読み込みました\n", filepath, count);
+  Serial.printf("DNSFilterManager: バッファ使用量: %d / %d バイト (%.1f%%)\n",
+                blocklistBufferUsed, blocklistBufferSize,
+                (float)blocklistBufferUsed * 100.0 / blocklistBufferSize);
   return true;
 }
 
@@ -266,6 +313,7 @@ bool DNSFilterManager::reloadBlocklist() {
 
 void DNSFilterManager::clearBlocklist() {
   blocklist.clear();
+  blocklistBufferUsed = 0;  // バッファの使用量をリセット（再利用可能にする）
 }
 
 int DNSFilterManager::getBlocklistCount() const {

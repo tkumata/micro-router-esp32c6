@@ -112,6 +112,9 @@ const IPAddress DNS_BLOCKED_IP(0, 0, 0, 0);
 const size_t DOMAIN_NAME_MIN_LENGTH = 3;
 const size_t DOMAIN_NAME_MAX_LENGTH = 253;
 
+// ===== ブロックリストメモリ設定 =====
+const size_t BLOCKLIST_BUFFER_SIZE = 131072;  // 128KB（5000ドメイン×平均20文字×1.3倍の余裕）
+
 // ===== グローバル変数 =====
 WebServer server(WEB_SERVER_PORT);
 Preferences preferences;

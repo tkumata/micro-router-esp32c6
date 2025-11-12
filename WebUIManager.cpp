@@ -14,6 +14,129 @@
 #include <LittleFS.h>  // Phase 8
 #include <Preferences.h>
 
+// ===== PROGMEM による HTML テンプレート（メモリ最適化） =====
+
+// 共通 CSS（フラッシュメモリに格納）
+const char HTML_COMMON_CSS[] PROGMEM = R"rawliteral(
+body{font-family:Arial,sans-serif;max-width:600px;margin:50px auto;padding:20px;background:#f5f5f5;}
+h1{color:#333;border-bottom:3px solid #007bff;padding-bottom:10px;}
+h2{color:#555;margin-top:30px;}
+.status{background:#fff;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:20px 0;}
+.status p{margin:10px 0;font-size:14px;}
+.status strong{color:#007bff;}
+.form-group{margin:15px 0;}
+label{display:block;margin-bottom:5px;font-weight:bold;color:#555;}
+input[type=text],input[type=password]{width:100%;padding:10px;box-sizing:border-box;border:1px solid #ddd;border-radius:4px;font-size:14px;}
+input[type=text]:focus,input[type=password]:focus{outline:none;border-color:#007bff;}
+button{background:#007bff;color:white;padding:12px 30px;border:none;border-radius:5px;cursor:pointer;font-size:16px;width:100%;margin-top:10px;}
+button:hover{background:#0056b3;}
+.connected{color:#28a745;}
+.disconnected{color:#dc3545;}
+.section{background:#fff;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:20px 0;}
+)rawliteral";
+
+// メインページテンプレート
+const char HTML_ROOT_TEMPLATE[] PROGMEM = R"rawliteral(
+<!DOCTYPE html><html><head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>XIAO ESP32C6 設定</title>
+<style>%CSS%</style>
+</head><body>
+<h1>XIAO ESP32C6 マイクロルーター</h1>
+<div style='margin:20px 0;'>
+<a href='/dns-filter' style='color:#007bff;text-decoration:none;margin-right:15px;'>DNS フィルタリング設定</a>
+<a href='/' style='color:#007bff;text-decoration:none;'>トップページ</a>
+</div>
+<div class='status'>
+<h2>ステータス</h2>
+<p>STA 接続: <strong class='%STA_CLASS%'>%STA_STATUS%</strong></p>
+<p>STA IP: <strong>%STA_IP%</strong></p>
+<p>AP クライアント数: <strong>%AP_CLIENTS% / %AP_MAX%</strong></p>
+<p>AP パスワード: <strong>%AP_PASSWORD_STATUS%</strong></p>
+<p>空きメモリ: <strong>%FREE_HEAP% KB</strong></p>
+</div>
+<div class='section'>
+<h2>Wi-Fi (STA) 設定</h2>
+<p>接続したい既存の Wi-Fi ネットワークの情報を入力してください。</p>
+<form method='POST' action='/save'>
+<div class='form-group'>
+<label>既存 Wi-Fi の SSID:</label>
+<input type='text' name='ssid' placeholder='例: MyHomeWiFi' required maxlength='%SSID_MAX%'>
+</div>
+<div class='form-group'>
+<label>パスワード:</label>
+<input type='password' name='password' placeholder='8文字以上' required minlength='%PASSWORD_MIN%' maxlength='%PASSWORD_MAX%'>
+</div>
+<button type='submit'>保存して再起動</button>
+</form>
+</div>
+<div class='section'>
+<h2>AP パスワード変更</h2>
+<p>このルーターの Wi-Fi アクセスポイント (micro-router-esp32c6) のパスワードを変更できます。</p>
+<form method='POST' action='/save_ap_password'>
+<div class='form-group'>
+<label>新しい AP パスワード:</label>
+<input type='password' name='ap_password' placeholder='8文字以上' required minlength='%PASSWORD_MIN%' maxlength='%PASSWORD_MAX%'>
+</div>
+<button type='submit'>AP パスワードを保存して再起動</button>
+</form>
+</div>
+</body></html>
+)rawliteral";
+
+// DNS フィルタページテンプレート
+const char HTML_DNS_FILTER_TEMPLATE[] PROGMEM = R"rawliteral(
+<!DOCTYPE html><html><head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>DNS フィルタリング</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:800px;margin:50px auto;padding:20px;background:#f5f5f5;}
+h1{color:#333;border-bottom:3px solid #007bff;padding-bottom:10px;}
+h2{color:#555;margin-top:30px;}
+.status{background:#fff;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:20px 0;}
+.form-group{margin:15px 0;}
+label{display:block;margin-bottom:5px;font-weight:bold;}
+button{background:#007bff;color:white;padding:10px 20px;border:none;border-radius:5px;cursor:pointer;}
+button:hover{background:#0056b3;}
+</style>
+</head><body>
+<h1>DNS フィルタリング</h1>
+<p><a href='/' style='color:#007bff;'>← トップページに戻る</a></p>
+<div class='status'>
+<h2>DNS フィルタ設定</h2>
+<form method='POST' action='/dns-filter-toggle'>
+<label>
+<input type='checkbox' name='enabled' %ENABLED_CHECKED%>
+DNS フィルタを有効にする
+</label><br><br>
+<button type='submit'>保存</button>
+</form>
+</div>
+<div class='status'>
+<h2>統計情報</h2>
+<ul>
+<li>総クエリ数: <strong>%TOTAL_QUERIES%</strong></li>
+<li>ブロック数: <strong>%BLOCKED_QUERIES%</strong>%BLOCKED_PERCENT%</li>
+<li>許可数: <strong>%ALLOWED_QUERIES%</strong>%ALLOWED_PERCENT%</li>
+<li>ブロックリスト登録数: <strong>%BLOCKLIST_COUNT% ドメイン</strong></li>
+</ul>
+</div>
+<div class='status'>
+<h2>ブロックリスト管理</h2>
+<form method='POST' action='/upload-blocklist' enctype='multipart/form-data'>
+<label>domain.txt をアップロード:</label><br>
+<input type='file' name='blocklist' accept='.txt' required><br><br>
+<button type='submit'>アップロード</button>
+</form>
+<p style='margin-top:15px;'>
+<a href='/download-blocklist' style='color:#007bff;'>現在のリストをダウンロード</a>
+</p>
+</div>
+</body></html>
+)rawliteral";
+
 // グローバル変数の extern 宣言
 extern DNSFilterManager dnsFilter;  // Phase 8
 extern Preferences preferences;
@@ -32,7 +155,7 @@ void setupWebServer() {
   server.on("/download-blocklist", HTTP_GET, handleDownloadBlocklist);
   server.on("/upload-blocklist", HTTP_POST,
     []() {
-      server.send(200, "text/html",
+      server.send(HTTP_STATUS_OK, "text/html",
         "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body>"
         "<h2>アップロード成功</h2>"
         "<p>ブロックリストが更新されました。</p>"
@@ -50,6 +173,7 @@ void setupWebServer() {
 
 /**
  * Web UI のルートページ（ステータス表示 + 設定フォーム）
+ * PROGMEM テンプレートを使用してメモリを最適化
  */
 void handleRoot() {
   // ステータス情報取得
@@ -58,81 +182,23 @@ void handleRoot() {
   int apClients = WiFi.softAPgetStationNum();
   uint32_t freeHeap = ESP.getFreeHeap();
 
-  // HTML 生成
-  String html = "<!DOCTYPE html><html><head>";
-  html += "<meta charset='UTF-8'>";
-  html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
-  html += "<title>XIAO ESP32C6 設定</title>";
-  html += "<style>";
-  html += "body{font-family:Arial,sans-serif;max-width:600px;margin:50px auto;padding:20px;background:#f5f5f5;}";
-  html += "h1{color:#333;border-bottom:3px solid #007bff;padding-bottom:10px;}";
-  html += "h2{color:#555;margin-top:30px;}";
-  html += ".status{background:#fff;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:20px 0;}";
-  html += ".status p{margin:10px 0;font-size:14px;}";
-  html += ".status strong{color:#007bff;}";
-  html += ".form-group{margin:15px 0;}";
-  html += "label{display:block;margin-bottom:5px;font-weight:bold;color:#555;}";
-  html += "input[type=text],input[type=password]{width:100%;padding:10px;box-sizing:border-box;border:1px solid #ddd;border-radius:4px;font-size:14px;}";
-  html += "input[type=text]:focus,input[type=password]:focus{outline:none;border-color:#007bff;}";
-  html += "button{background:#007bff;color:white;padding:12px 30px;border:none;border-radius:5px;cursor:pointer;font-size:16px;width:100%;margin-top:10px;}";
-  html += "button:hover{background:#0056b3;}";
-  html += ".connected{color:#28a745;}";
-  html += ".disconnected{color:#dc3545;}";
-  html += ".section{background:#fff;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:20px 0;}";
-  html += "</style>";
-  html += "</head><body>";
+  // テンプレートを PROGMEM から読み込み
+  String html = FPSTR(HTML_ROOT_TEMPLATE);
 
-  html += "<h1>XIAO ESP32C6 マイクロルーター</h1>";
+  // CSS を埋め込み
+  html.replace("%CSS%", FPSTR(HTML_COMMON_CSS));
 
-  // ナビゲーション（Phase 8）
-  html += "<div style='margin:20px 0;'>";
-  html += "<a href='/dns-filter' style='color:#007bff;text-decoration:none;margin-right:15px;'>DNS フィルタリング設定</a>";
-  html += "<a href='/' style='color:#007bff;text-decoration:none;'>トップページ</a>";
-  html += "</div>";
-
-  // ステータス表示
-  html += "<div class='status'>";
-  html += "<h2>ステータス</h2>";
-  html += "<p>STA 接続: <strong class='" + String(staConnected ? "connected" : "disconnected") + "'>";
-  html += staConnected ? "接続済み" : "未接続";
-  html += "</strong></p>";
-  html += "<p>STA IP: <strong>" + staIP + "</strong></p>";
-  html += "<p>AP クライアント数: <strong>" + String(apClients) + " / " + String(AP_MAX_CONNECTIONS) + "</strong></p>";
-  html += "<p>AP パスワード: <strong>" + String(config.ap_password_set ? "カスタム設定済み" : "デフォルト") + "</strong></p>";
-  html += "<p>空きメモリ: <strong>" + String(freeHeap / BYTES_TO_KB_DIVISOR) + " KB</strong></p>";
-  html += "</div>";
-
-  // STA 設定フォーム
-  html += "<div class='section'>";
-  html += "<h2>Wi-Fi (STA) 設定</h2>";
-  html += "<p>接続したい既存の Wi-Fi ネットワークの情報を入力してください。</p>";
-  html += "<form method='POST' action='/save'>";
-  html += "<div class='form-group'>";
-  html += "<label>既存 Wi-Fi の SSID:</label>";
-  html += "<input type='text' name='ssid' placeholder='例: MyHomeWiFi' required maxlength='" + String(WIFI_SSID_MAX_LENGTH) + "'>";
-  html += "</div>";
-  html += "<div class='form-group'>";
-  html += "<label>パスワード:</label>";
-  html += "<input type='password' name='password' placeholder='8文字以上' required minlength='" + String(WIFI_PASSWORD_MIN_LENGTH) + "' maxlength='" + String(WIFI_PASSWORD_MAX_LENGTH) + "'>";
-  html += "</div>";
-  html += "<button type='submit'>保存して再起動</button>";
-  html += "</form>";
-  html += "</div>";
-
-  // AP パスワード設定フォーム
-  html += "<div class='section'>";
-  html += "<h2>AP パスワード変更</h2>";
-  html += "<p>このルーターの Wi-Fi アクセスポイント (micro-router-esp32c6) のパスワードを変更できます。</p>";
-  html += "<form method='POST' action='/save_ap_password'>";
-  html += "<div class='form-group'>";
-  html += "<label>新しい AP パスワード:</label>";
-  html += "<input type='password' name='ap_password' placeholder='8文字以上' required minlength='" + String(WIFI_PASSWORD_MIN_LENGTH) + "' maxlength='" + String(WIFI_PASSWORD_MAX_LENGTH) + "'>";
-  html += "</div>";
-  html += "<button type='submit'>AP パスワードを保存して再起動</button>";
-  html += "</form>";
-  html += "</div>";
-
-  html += "</body></html>";
+  // 動的な値を置換
+  html.replace("%STA_CLASS%", staConnected ? "connected" : "disconnected");
+  html.replace("%STA_STATUS%", staConnected ? "接続済み" : "未接続");
+  html.replace("%STA_IP%", staIP);
+  html.replace("%AP_CLIENTS%", String(apClients));
+  html.replace("%AP_MAX%", String(AP_MAX_CONNECTIONS));
+  html.replace("%AP_PASSWORD_STATUS%", config.ap_password_set ? "カスタム設定済み" : "デフォルト");
+  html.replace("%FREE_HEAP%", String(freeHeap / BYTES_TO_KB_DIVISOR));
+  html.replace("%SSID_MAX%", String(WIFI_SSID_MAX_LENGTH));
+  html.replace("%PASSWORD_MIN%", String(WIFI_PASSWORD_MIN_LENGTH));
+  html.replace("%PASSWORD_MAX%", String(WIFI_PASSWORD_MAX_LENGTH));
 
   server.send(HTTP_STATUS_OK, "text/html", html);
 }
@@ -247,76 +313,32 @@ void handleSaveAPPassword() {
 
 /**
  * DNS フィルタページ（GET /dns-filter）
+ * PROGMEM テンプレートを使用してメモリを最適化
  */
 void handleDNSFilter() {
   DNSStats stats = dnsFilter.getStats();
   int blocklistCount = dnsFilter.getBlocklistCount();
   bool enabled = dnsFilter.isEnabled();
 
-  String html = "<!DOCTYPE html><html><head>";
-  html += "<meta charset='UTF-8'>";
-  html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
-  html += "<title>DNS フィルタリング</title>";
-  html += "<style>";
-  html += "body{font-family:Arial,sans-serif;max-width:800px;margin:50px auto;padding:20px;background:#f5f5f5;}";
-  html += "h1{color:#333;border-bottom:3px solid #007bff;padding-bottom:10px;}";
-  html += "h2{color:#555;margin-top:30px;}";
-  html += ".status{background:#fff;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:20px 0;}";
-  html += ".form-group{margin:15px 0;}";
-  html += "label{display:block;margin-bottom:5px;font-weight:bold;}";
-  html += "button{background:#007bff;color:white;padding:10px 20px;border:none;border-radius:5px;cursor:pointer;}";
-  html += "button:hover{background:#0056b3;}";
-  html += "</style>";
-  html += "</head><body>";
+  // テンプレートを PROGMEM から読み込み
+  String html = FPSTR(HTML_DNS_FILTER_TEMPLATE);
 
-  html += "<h1>DNS フィルタリング</h1>";
-  html += "<p><a href='/' style='color:#007bff;'>← トップページに戻る</a></p>";
+  // 動的な値を置換
+  html.replace("%ENABLED_CHECKED%", enabled ? "checked" : "");
+  html.replace("%TOTAL_QUERIES%", String(stats.totalQueries));
+  html.replace("%BLOCKED_QUERIES%", String(stats.blockedQueries));
+  html.replace("%ALLOWED_QUERIES%", String(stats.allowedQueries));
+  html.replace("%BLOCKLIST_COUNT%", String(blocklistCount));
 
-  // 有効/無効切り替え
-  html += "<div class='status'>";
-  html += "<h2>DNS フィルタ設定</h2>";
-  html += "<form method='POST' action='/dns-filter-toggle'>";
-  html += "<label>";
-  html += "<input type='checkbox' name='enabled' " + String(enabled ? "checked" : "") + "> ";
-  html += "DNS フィルタを有効にする";
-  html += "</label><br><br>";
-  html += "<button type='submit'>保存</button>";
-  html += "</form>";
-  html += "</div>";
-
-  // 統計情報
-  html += "<div class='status'>";
-  html += "<h2>統計情報</h2>";
-  html += "<ul>";
-  html += "<li>総クエリ数: <strong>" + String(stats.totalQueries) + "</strong></li>";
-  html += "<li>ブロック数: <strong>" + String(stats.blockedQueries) + "</strong>";
+  // パーセント計算
+  String blockedPercent = "";
+  String allowedPercent = "";
   if (stats.totalQueries > 0) {
-    html += " (" + String(stats.blockedQueries * PERCENTAGE_MULTIPLIER / stats.totalQueries) + "%)";
+    blockedPercent = " (" + String(stats.blockedQueries * PERCENTAGE_MULTIPLIER / stats.totalQueries) + "%)";
+    allowedPercent = " (" + String(stats.allowedQueries * PERCENTAGE_MULTIPLIER / stats.totalQueries) + "%)";
   }
-  html += "</li>";
-  html += "<li>許可数: <strong>" + String(stats.allowedQueries) + "</strong>";
-  if (stats.totalQueries > 0) {
-    html += " (" + String(stats.allowedQueries * PERCENTAGE_MULTIPLIER / stats.totalQueries) + "%)";
-  }
-  html += "</li>";
-  html += "<li>ブロックリスト登録数: <strong>" + String(blocklistCount) + " ドメイン</strong></li>";
-  html += "</ul>";
-  html += "</div>";
-
-  // ブロックリストアップロード
-  html += "<div class='status'>";
-  html += "<h2>ブロックリスト管理</h2>";
-  html += "<form method='POST' action='/upload-blocklist' enctype='multipart/form-data'>";
-  html += "<label>domain.txt をアップロード:</label><br>";
-  html += "<input type='file' name='blocklist' accept='.txt' required><br><br>";
-  html += "<button type='submit'>アップロード</button>";
-  html += "</form>";
-  html += "<p style='margin-top:15px;'>";
-  html += "<a href='/download-blocklist' style='color:#007bff;'>現在のリストをダウンロード</a>";
-  html += "</p>";
-  html += "</div>";
-
-  html += "</body></html>";
+  html.replace("%BLOCKED_PERCENT%", blockedPercent);
+  html.replace("%ALLOWED_PERCENT%", allowedPercent);
 
   server.send(HTTP_STATUS_OK, "text/html", html);
 }
