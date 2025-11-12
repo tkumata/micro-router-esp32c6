@@ -54,7 +54,7 @@ void setupAP() {
   if (ap_netif != NULL) {
     // DNS サーバーとして自分自身（192.168.4.1）を設定
     esp_netif_dns_info_t dns_info;
-    dns_info.ip.u_addr.ip4.addr = ESP_IP4TOADDR(192, 168, 4, 1);
+    dns_info.ip.u_addr.ip4.addr = static_cast<uint32_t>(AP_IP);
     dns_info.ip.type = ESP_IPADDR_TYPE_V4;
 
     esp_netif_set_dns_info(ap_netif, ESP_NETIF_DNS_MAIN, &dns_info);
