@@ -157,13 +157,13 @@
      ▼
 ┌────────────────────────────────────────┐
 │  XIAO ESP32C6 - AP Mode                │
-│  IP 割り当て: 192.168.4.2              │
+│  Assign IP: 192.168.4.2                │
 └────┬───────────────────────────────────┘
      │ ② http://192.168.4.1 にアクセス
      ▼
 ┌────────────────────────────────────────┐
 │  Web Server (Port 80)                  │
-│  GET / → 設定画面 HTML を返す          │
+│  GET / → Return setting HTML           │
 └────┬───────────────────────────────────┘
      │ ③ 設定画面表示
      ▼
@@ -401,7 +401,7 @@ struct router_status {
 };
 ```
 
-#### 4.2.6 Web サーバーハンドラー構造
+#### 4.2.6 Web サーバハンドラ構造
 
 ```cpp
 // WebServer のエンドポイント定義
@@ -494,15 +494,15 @@ WebEndpoint endpoints[] = {
 [AP モードのみ起動]
  - SSID: micro-router-esp32c6
  - IP: 192.168.4.1
- - DHCP サーバー起動
- - Web サーバー起動
+ - DHCP サーバ起動
+ - Web サーバ起動
     │
     ▼
 [待機状態]
  - シリアルログ: "STA 未設定。http://192.168.4.1 で設定してください"
  - Web UI で設定を待つ
     │
-    │ ◄── ユーザーが Web UI で SSID/パスワード入力
+    │ ◄── ユーザが Web UI で SSID/パスワード入力
     │
     ▼
 [設定を EEPROM に保存]
@@ -537,9 +537,9 @@ WebEndpoint endpoints[] = {
  - WiFi.begin(ssid, password)
  - 接続試行 (30秒タイムアウト)
     │
-    ├─→ [接続失敗] → [リトライ]
-    │                     │
-    ▼                     │
+    ├─→ [接続失敗] → [re-try]
+    │                    │
+    ▼                    │
 [STA 接続成功] ◄──────────┘
  - IP アドレス取得
  - DNS サーバー取得
@@ -638,15 +638,15 @@ WebEndpoint endpoints[] = {
 
 ### 7.2 NVS (EEPROM) 使用量
 
-| 項目               | サイズ         |
-| ------------------ | -------------- |
-| sta_ssid           | 最大 33 bytes  |
-| sta_password       | 最大 65 bytes  |
-| ap_password (Ph6)  | 最大 65 bytes  |
-| configured         | 1 byte         |
-| ap_pw_set (Ph6)    | 1 byte         |
-| NVS メタデータ     | ~100 bytes     |
-| **合計**           | **~265 bytes** |
+| 項目              | サイズ         |
+| ----------------- | -------------- |
+| sta_ssid          | 最大 33 bytes  |
+| sta_password      | 最大 65 bytes  |
+| ap_password (Ph6) | 最大 65 bytes  |
+| configured        | 1 byte         |
+| ap_pw_set (Ph6)   | 1 byte         |
+| NVS メタデータ    | ~100 bytes     |
+| **合計**          | **~265 bytes** |
 
 ### 7.3 スループット制限要因
 
