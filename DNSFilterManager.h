@@ -55,6 +55,9 @@ public:
   void setEnabled(bool enabled);
   bool isEnabled() const;
 
+  void setCaptivePortal(bool enabled);
+  bool isCaptivePortal() const;
+
   // ===== ブロックリスト管理 =====
   bool loadBlocklistFromFile(const char* filepath = "/blocklist.txt");
   bool reloadBlocklist();
@@ -68,6 +71,7 @@ public:
 private:
   WiFiUDP udp;                      // DNS サーバー用 UDP
   bool enabled;                     // フィルタ有効フラグ
+  bool captivePortalEnabled;        // キャプティブポータルモード（全クエリに自分のIPを返す）
 
   // メモリ効率の良いブロックリスト実装
   char* blocklistBuffer;            // 文字列プール（単一バッファ）
@@ -81,7 +85,7 @@ private:
   // ===== DNS パケット処理 =====
   String extractDomainFromDNSQuery(uint8_t* packet, size_t len);
   bool isBlocked(const String& domain);
-  void sendBlockedResponse(uint8_t* query, size_t len, IPAddress clientIP, uint16_t clientPort);
+  void sendCustomIPResponse(uint8_t* query, size_t len, IPAddress clientIP, uint16_t clientPort, IPAddress responseIP);
   void forwardToUpstream(uint8_t* query, size_t len, IPAddress clientIP, uint16_t clientPort);
 
   // ===== ユーティリティ =====

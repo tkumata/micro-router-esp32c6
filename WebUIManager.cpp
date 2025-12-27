@@ -165,6 +165,21 @@ void setupWebServer() {
     handleUploadBlocklist
   );
 
+  // キャプティブポータル対策: 未知のURLはすべてルートへリダイレクト
+  server.onNotFound([]() {
+    String host = server.hostHeader();
+    Serial.printf("Unknown request: %s (Host: %s)\n", server.uri().c_str(), host.c_str());
+
+    // キャプティブポータル検出用URLの場合、またはIP直打ちでない場合
+    if (!host.equals(AP_IP.toString())) {
+      server.sendHeader("Location", String("http://") + AP_IP.toString() + "/", true);
+      server.send(302, "text/plain", "");
+    } else {
+      // 自分のIP宛だが存在しないパスの場合は404
+      server.send(404, "text/plain", "Not Found");
+    }
+  });
+
   server.begin();
 
   Serial.println();
