@@ -25,6 +25,7 @@
 #include <Preferences.h>
 #include <LittleFS.h>   // ファイルシステム（Phase 8）
 #include <esp_netif.h>  // ESP-IDF netif API（NAT機能用）
+#include <ESPmDNS.h>    // mDNS 機能
 
 #include "Config.h"
 #include "Types.h"
@@ -180,6 +181,13 @@ void setup() {
   // Web サーバーの起動
   setupWebServer();
 
+  // mDNS の開始
+  if (MDNS.begin("micro-router")) {
+    Serial.println("mDNS レスポンダーを開始しました: http://micro-router.local");
+  } else {
+    Serial.println("mDNS のセットアップに失敗しました");
+  }
+
   // DNS フィルタの初期化（Phase 8）
   if (dnsFilter.begin()) {
     Serial.println("DNS フィルタを正常に起動しました");
@@ -191,6 +199,12 @@ void setup() {
 
     dnsFilter.setEnabled(dnsFilterEnabled);
     Serial.printf("DNS フィルタ設定: %s\n", dnsFilterEnabled ? "有効" : "無効");
+    
+    // キャプティブポータルの初期状態設定
+    // 未設定 または 設定済みだが接続できていない場合は有効化
+    if (!config.configured || WiFi.status() != WL_CONNECTED) {
+      dnsFilter.setCaptivePortal(true);
+    }
   } else {
     Serial.println("DNS フィルタの起動に失敗しました");
   }
@@ -214,6 +228,24 @@ void loop() {
 
   // STA 再接続処理
   checkAndReconnectSTA();
+
+  // キャプティブポータルの状態管理
+  // ネット接続がない場合は強制的に設定画面へ誘導する
+  if (config.configured) {
+    bool currentlyConnected = (WiFi.status() == WL_CONNECTED);
+    if (currentlyConnected && dnsFilter.isCaptivePortal()) {
+      dnsFilter.setCaptivePortal(false);
+      Serial.println("Captive Portal: 無効化 (インターネット接続復帰)");
+    } else if (!currentlyConnected && !dnsFilter.isCaptivePortal()) {
+      dnsFilter.setCaptivePortal(true);
+      Serial.println("Captive Portal: 有効化 (インターネット接続ロスト)");
+    }
+  } else {
+    // 未設定時は常に有効
+    if (!dnsFilter.isCaptivePortal()) {
+      dnsFilter.setCaptivePortal(true);
+    }
+  }
 
   // 定期的なステータス表示
   printPeriodicStatus();

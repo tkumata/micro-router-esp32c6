@@ -7,6 +7,7 @@
 
 DNSFilterManager::DNSFilterManager()
   : enabled(false),
+    captivePortalEnabled(false),
     blocklistBuffer(nullptr),
     blocklistBufferSize(0),
     blocklistBufferUsed(0),
@@ -83,11 +84,21 @@ void DNSFilterManager::handleClient() {
   Serial.printf("DNSFilterManager: %s からのクエリ: %s\n",
                 clientIP.toString().c_str(), domain.c_str());
 
+  // キャプティブポータルモード: すべてのクエリに自分(AP_IP)を返す
+  if (captivePortalEnabled) {
+    // 自分自身(micro-router.local)へのクエリは常に許可(正しいIPを返す)したいが、
+    // mDNSはUDP 5353なのでここには来ない。
+    // 通常のDNSクエリとして来た場合も、AP_IPを返せば設定画面が開くのでOK。
+    Serial.printf("CaptivePortal: %s -> %s\n", domain.c_str(), AP_IP.toString().c_str());
+    sendCustomIPResponse(packet, len, clientIP, clientPort, AP_IP);
+    return;
+  }
+
   // ブロックリストと照合
   if (isBlocked(domain)) {
     Serial.printf("DNSFilterManager: ブロック %s\n", domain.c_str());
     stats.blockedQueries++;
-    sendBlockedResponse(packet, len, clientIP, clientPort);
+    sendCustomIPResponse(packet, len, clientIP, clientPort, DNS_BLOCKED_IP);
   } else {
     Serial.printf("DNSFilterManager: 許可 %s\n", domain.c_str());
     stats.allowedQueries++;
@@ -149,8 +160,8 @@ bool DNSFilterManager::isBlocked(const String& domain) {
   return false;
 }
 
-void DNSFilterManager::sendBlockedResponse(uint8_t* query, size_t len,
-                                            IPAddress clientIP, uint16_t clientPort) {
+void DNSFilterManager::sendCustomIPResponse(uint8_t* query, size_t len,
+                                            IPAddress clientIP, uint16_t clientPort, IPAddress responseIP) {
   // DNS 応答パケットを作成
   uint8_t response[DNS_MAX_PACKET_SIZE];
   memcpy(response, query, len);
@@ -188,11 +199,11 @@ void DNSFilterManager::sendBlockedResponse(uint8_t* query, size_t len,
   response[answerOffset++] = DNS_DATA_LENGTH_HIGH_BYTE;
   response[answerOffset++] = DNS_IPV4_ADDRESS_LENGTH;
 
-  // Data: DNS_BLOCKED_IP (0.0.0.0)
-  response[answerOffset++] = DNS_BLOCKED_IP[0];
-  response[answerOffset++] = DNS_BLOCKED_IP[1];
-  response[answerOffset++] = DNS_BLOCKED_IP[2];
-  response[answerOffset++] = DNS_BLOCKED_IP[3];
+  // Data: responseIP
+  response[answerOffset++] = responseIP[0];
+  response[answerOffset++] = responseIP[1];
+  response[answerOffset++] = responseIP[2];
+  response[answerOffset++] = responseIP[3];
 
   // クライアントに送信
   udp.beginPacket(clientIP, clientPort);
@@ -318,6 +329,15 @@ void DNSFilterManager::clearBlocklist() {
 
 int DNSFilterManager::getBlocklistCount() const {
   return blocklist.size();
+}
+
+void DNSFilterManager::setCaptivePortal(bool enable) {
+  captivePortalEnabled = enable;
+  Serial.printf("DNSFilterManager: キャプティブポータルモード %s\n", captivePortalEnabled ? "有効" : "無効");
+}
+
+bool DNSFilterManager::isCaptivePortal() const {
+  return captivePortalEnabled;
 }
 
 void DNSFilterManager::setEnabled(bool enable) {
