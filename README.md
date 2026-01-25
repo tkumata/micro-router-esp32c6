@@ -3,6 +3,10 @@
 **Seeed Studio XIAO ESP32C6** (RISC-V) を使用した、極小・セキュア・ポータブルな Wi-Fi ルータの実装です。**NAT ルーティング**、**デュアルモード Wi-Fi**、そしてハードウェアレベルでの **DNS 広告ブロック**機能を備えています。
 
 ![image](./docs/IMG_0517.jpeg)
+![screenshot](./docs/screenshot01.jpeg)
+![screenshot](./docs/screenshot02.jpeg)
+![screenshot](./docs/screenshot03.jpeg)
+![screenshot](./docs/screenshot04.jpeg)
 
 ## 主な機能
 
@@ -15,26 +19,28 @@
 
 ## ハードウェア要件
 
-- **Seeed Studio XIAO ESP32C6** (必須: RISC-V アーキテクチャ)
+- **Seeed Studio XIAO ESP32C6** (RISC-V アーキテクチャ)
   - _注意: SDK の違いにより、XIAO ESP32-C3/S3 とは互換性がありません。_
 - USB-C 電源
+- [ロッドアンテナ](https://www.switch-science.com/products/8637?srsltid=AfmBOorYfYhZlwbtTnjM_BVI_2CNzRxPAIbcTrlz1YavxpxQNJl2zq6w)
+  - _補足: XIAO ESP32C6 単体でも近場なら十分に電波は届きますが、ロッドアンテナがあると、-35dBm 〜 -40dBm くらいで安心できます。_
 
 ## 始め方
 
 ### 1. インストール
 
-1.  Arduino IDE で **ESP32 Board Package v3.0.0+** をセットアップします。
-2.  ボードを選択: **XIAO_ESP32C6**。
-3.  このスケッチ (`micro-router-esp32c6.ino`) を書き込みます。
-4.  (オプション) ブロックリストを予め入れたい場合はファイルシステム (LittleFS) アップロードを行います。
+1. Arduino IDE で **ESP32 Board Package v3.0.0+** をセットアップします。
+2. ボードを選択: **XIAO_ESP32C6**。
+3. このスケッチ (`micro-router-esp32c6.ino`) を書き込みます。
+4. (オプション) ブロックリストを予め入れたい場合はファイルシステム (LittleFS) アップロードを行います。
 
 ### 2. 初期設定
 
-1.  デバイスの電源を入れます。
-2.  Wi-Fi に接続: **`micro-router-esp32c6`** (初期パスワード: `esp32c6router`)。
-3.  キャプティブポータルが開きます。開かない場合は `http://192.168.4.1` へアクセスしてください。
-4.  自宅の Wi-Fi SSID とパスワードを入力します。
-5.  **保存して再起動** をクリックします。
+1. デバイスの電源を入れます。
+2. Wi-Fi に接続: **`micro-router-esp32c6`** (初期パスワード: `esp32c6router`)。
+3. キャプティブポータルが開きます。開かない場合は `http://192.168.4.1` へアクセスしてください。
+4. 自宅の Wi-Fi SSID とパスワードを入力します。
+5. **保存して再起動** をクリックします。
 
 ### 3. 使用方法
 
