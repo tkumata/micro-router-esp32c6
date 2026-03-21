@@ -22,7 +22,7 @@ String calculatePercentText(uint32_t value, uint32_t total) {
   if (total == 0) {
     return "";
   }
-  return " (" + String(value * PERCENTAGE_MULTIPLIER / total) + "%)";
+  return " (" + String(static_cast<uint64_t>(value) * PERCENTAGE_MULTIPLIER / total) + "%)";
 }
 }
 
