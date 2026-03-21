@@ -32,11 +32,31 @@ void restartDeviceWithLog(const char* logTitle) {
 }
 
 bool replaceBlocklistFile() {
+  // 古いバックアップを削除
   LittleFS.remove(BLOCKLIST_BACKUP_PATH);
+
+  bool backupCreated = false;
+
+  // 既存のブロックリストがあればバックアップを作成
   if (LittleFS.exists(BLOCKLIST_PATH)) {
-    LittleFS.rename(BLOCKLIST_PATH, BLOCKLIST_BACKUP_PATH);
+    if (!LittleFS.rename(BLOCKLIST_PATH, BLOCKLIST_BACKUP_PATH)) {
+      // バックアップ作成に失敗したら、安全のため置換処理自体を中止
+      return false;
+    }
+    backupCreated = true;
   }
-  return LittleFS.rename(BLOCKLIST_UPLOAD_PATH, BLOCKLIST_PATH);
+
+  // アップロードされた一時ファイルを本体パスへリネーム
+  if (LittleFS.rename(BLOCKLIST_UPLOAD_PATH, BLOCKLIST_PATH)) {
+    return true;
+  }
+
+  // 失敗時は、可能であればバックアップからロールバック
+  if (backupCreated && LittleFS.exists(BLOCKLIST_BACKUP_PATH)) {
+    LittleFS.rename(BLOCKLIST_BACKUP_PATH, BLOCKLIST_PATH);
+  }
+
+  return false;
 }
 }
 
