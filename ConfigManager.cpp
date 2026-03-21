@@ -81,3 +81,16 @@ void saveAPPassword(const char* password) {
 
   Serial.println("--- AP パスワード保存完了 ---");
 }
+
+bool loadDNSFilterEnabled() {
+  preferences.begin(PREF_NAMESPACE, true);
+  bool enabled = preferences.getBool(PREF_KEY_DNS_FILTER_ENABLED, false);
+  preferences.end();
+  return enabled;
+}
+
+void saveDNSFilterEnabled(bool enabled) {
+  preferences.begin(PREF_NAMESPACE, false);
+  preferences.putBool(PREF_KEY_DNS_FILTER_ENABLED, enabled);
+  preferences.end();
+}

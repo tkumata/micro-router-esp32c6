@@ -11,19 +11,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
-#include <LittleFS.h>
-#include <vector>
-
-// ===== DNS パケット定数 =====
-#define DNS_PORT 53
-#define DNS_MAX_PACKET_SIZE 512
-#define DNS_HEADER_SIZE 12
-#define MAX_BLOCKLIST_SIZE 5000
-
-// DNS 応答パケット定数
-#define DNS_ANSWER_COUNT_HIGH_BYTE 0x00
-#define DNS_ANSWER_COUNT_LOW_BYTE 0x01
-#define DNS_DATA_LENGTH_HIGH_BYTE 0x00
+#include "DNSBlocklistStore.h"
 
 // ===== 統計情報構造体 =====
 struct DNSStats {
@@ -73,23 +61,13 @@ private:
   bool enabled;                     // フィルタ有効フラグ
   bool captivePortalEnabled;        // キャプティブポータルモード（全クエリに自分のIPを返す）
 
-  // メモリ効率の良いブロックリスト実装
-  char* blocklistBuffer;            // 文字列プール（単一バッファ）
-  size_t blocklistBufferSize;       // バッファの総サイズ
-  size_t blocklistBufferUsed;       // 使用済みサイズ
-  std::vector<const char*> blocklist;  // ドメイン文字列へのポインタリスト
-
+  DNSBlocklistStore blocklistStore;
   DNSStats stats;                   // 統計情報
   IPAddress upstreamDNS;            // 上流 DNS サーバー
 
   // ===== DNS パケット処理 =====
-  String extractDomainFromDNSQuery(uint8_t* packet, size_t len);
-  bool isBlocked(const String& domain);
   void sendCustomIPResponse(uint8_t* query, size_t len, IPAddress clientIP, uint16_t clientPort, IPAddress responseIP);
   void forwardToUpstream(uint8_t* query, size_t len, IPAddress clientIP, uint16_t clientPort);
-
-  // ===== ユーティリティ =====
-  bool isValidDomain(const String& domain);
 };
 
 #endif // DNS_FILTER_MANAGER_H

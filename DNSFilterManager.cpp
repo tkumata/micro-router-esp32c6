@@ -4,35 +4,32 @@
 
 #include "DNSFilterManager.h"
 #include "Config.h"
+#include "DNSPacketCodec.h"
+
+namespace {
+constexpr uint16_t kDnsPort = 53;
+constexpr size_t kDnsMaxPacketSize = 512;
+}
 
 DNSFilterManager::DNSFilterManager()
   : enabled(false),
     captivePortalEnabled(false),
-    blocklistBuffer(nullptr),
-    blocklistBufferSize(0),
-    blocklistBufferUsed(0),
     upstreamDNS(DEFAULT_UPSTREAM_DNS) {
   stats = {0, 0, 0, 0};
 }
 
-DNSFilterManager::~DNSFilterManager() {
-  end();
-  if (blocklistBuffer) {
-    free(blocklistBuffer);
-    blocklistBuffer = nullptr;
-  }
-}
+DNSFilterManager::~DNSFilterManager() { end(); }
 
 bool DNSFilterManager::begin() {
   Serial.println("DNSFilterManager: DNS Proxy サーバーを起動中...");
 
   // UDP ポート 53 でリッスン開始
-  if (!udp.begin(DNS_PORT)) {
+  if (!udp.begin(kDnsPort)) {
     Serial.println("DNSFilterManager: UDP ポート 53 の起動に失敗しました");
     return false;
   }
 
-  Serial.printf("DNSFilterManager: ポート %d でリッスン開始\n", DNS_PORT);
+  Serial.printf("DNSFilterManager: ポート %d でリッスン開始\n", kDnsPort);
 
   // ブロックリストを読み込み
   loadBlocklistFromFile();
@@ -47,10 +44,6 @@ void DNSFilterManager::end() {
 }
 
 void DNSFilterManager::handleClient() {
-  if (!enabled) {
-    return;
-  }
-
   int packetSize = udp.parsePacket();
   if (packetSize == 0) {
     return;  // パケット無し
@@ -61,10 +54,10 @@ void DNSFilterManager::handleClient() {
   uint16_t clientPort = udp.remotePort();
 
   // DNS クエリパケットを読み込み
-  uint8_t packet[DNS_MAX_PACKET_SIZE];
-  int len = udp.read(packet, DNS_MAX_PACKET_SIZE);
+  uint8_t packet[kDnsMaxPacketSize];
+  int len = udp.read(packet, kDnsMaxPacketSize);
 
-  if (len < DNS_HEADER_SIZE) {
+  if (len < static_cast<int>(DNS_HEADER_SIZE)) {
     Serial.println("DNSFilterManager: 不正な DNS パケット（サイズ不足）");
     stats.errorQueries++;
     return;
@@ -73,7 +66,7 @@ void DNSFilterManager::handleClient() {
   stats.totalQueries++;
 
   // ドメイン名を抽出
-  String domain = extractDomainFromDNSQuery(packet, len);
+  String domain = DNSPacketCodec::extractDomainFromQuery(packet, len);
 
   if (domain.length() == 0) {
     Serial.println("DNSFilterManager: ドメイン抽出に失敗");
@@ -94,8 +87,15 @@ void DNSFilterManager::handleClient() {
     return;
   }
 
+  if (!enabled) {
+    Serial.printf("DNSFilterManager: フィルタ無効のため上流転送 %s\n", domain.c_str());
+    stats.allowedQueries++;
+    forwardToUpstream(packet, len, clientIP, clientPort);
+    return;
+  }
+
   // ブロックリストと照合
-  if (isBlocked(domain)) {
+  if (blocklistStore.contains(domain)) {
     Serial.printf("DNSFilterManager: ブロック %s\n", domain.c_str());
     stats.blockedQueries++;
     sendCustomIPResponse(packet, len, clientIP, clientPort, DNS_BLOCKED_IP);
@@ -106,108 +106,17 @@ void DNSFilterManager::handleClient() {
   }
 }
 
-String DNSFilterManager::extractDomainFromDNSQuery(uint8_t* packet, size_t len) {
-  if (len < DNS_HEADER_SIZE) {
-    return "";
-  }
-
-  String domain = "";
-  uint8_t* ptr = packet + DNS_HEADER_SIZE;  // ヘッダーをスキップ
-  uint8_t* end = packet + len;
-
-  while (ptr < end && *ptr != 0) {
-    uint8_t labelLen = *ptr++;
-
-    // 圧縮ポインタチェック（上位2ビットが11の場合）
-    if ((labelLen & DNS_COMPRESSION_POINTER_MASK) == DNS_COMPRESSION_POINTER_MASK) {
-      break;  // 圧縮ポインタは未対応（通常のクエリでは不要）
-    }
-
-    if (labelLen > DNS_LABEL_MAX_LENGTH || ptr + labelLen > end) {
-      return "";  // 不正なラベル長
-    }
-
-    if (domain.length() > 0) {
-      domain += ".";
-    }
-
-    for (int i = 0; i < labelLen; i++) {
-      domain += (char)*ptr++;
-    }
-  }
-
-  domain.toLowerCase();
-  return domain;
-}
-
-bool DNSFilterManager::isBlocked(const String& domain) {
-  for (const char* blocked : blocklist) {
-    size_t blockedLen = strlen(blocked);
-    size_t domainLen = domain.length();
-
-    // 完全一致チェック
-    if (domain.equals(blocked)) {
-      return true;
-    }
-
-    // サブドメイン一致チェック (例: example.com が ads.example.com にマッチ)
-    if (domainLen > blockedLen && domain.charAt(domainLen - blockedLen - 1) == '.') {
-      if (domain.endsWith(blocked)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 void DNSFilterManager::sendCustomIPResponse(uint8_t* query, size_t len,
                                             IPAddress clientIP, uint16_t clientPort, IPAddress responseIP) {
-  // DNS 応答パケットを作成
-  uint8_t response[DNS_MAX_PACKET_SIZE];
-  memcpy(response, query, len);
+  uint8_t response[kDnsMaxPacketSize];
+  size_t responseLen = DNSPacketCodec::buildIPv4Response(response, query, len, responseIP);
+  if (responseLen == 0) {
+    stats.errorQueries++;
+    return;
+  }
 
-  // フラグを設定（応答、権威あり、エラー無し）
-  response[2] = DNS_RESPONSE_FLAGS_BYTE2;  // QR=1, Opcode=0, AA=0, TC=0, RD=1
-  response[3] = DNS_RESPONSE_FLAGS_BYTE3;  // RA=1, Z=0, RCODE=0
-
-  // Answer Count = 1
-  response[6] = DNS_ANSWER_COUNT_HIGH_BYTE;
-  response[7] = DNS_ANSWER_COUNT_LOW_BYTE;
-
-  // Answer Section を追加
-  size_t answerOffset = len;
-
-  // Name: 圧縮ポインタ (DNS_COMPRESSION_POINTER_QUERY = Query Section の先頭を指す)
-  response[answerOffset++] = (DNS_COMPRESSION_POINTER_QUERY >> 8) & 0xFF;  // 上位バイト
-  response[answerOffset++] = DNS_COMPRESSION_POINTER_QUERY & 0xFF;         // 下位バイト
-
-  // Type: A
-  response[answerOffset++] = (DNS_TYPE_A >> 8) & 0xFF;  // 上位バイト
-  response[answerOffset++] = DNS_TYPE_A & 0xFF;         // 下位バイト
-
-  // Class: IN
-  response[answerOffset++] = (DNS_CLASS_IN >> 8) & 0xFF;  // 上位バイト
-  response[answerOffset++] = DNS_CLASS_IN & 0xFF;         // 下位バイト
-
-  // TTL
-  response[answerOffset++] = (DNS_TTL_SECONDS >> 24) & 0xFF;
-  response[answerOffset++] = (DNS_TTL_SECONDS >> 16) & 0xFF;
-  response[answerOffset++] = (DNS_TTL_SECONDS >> 8) & 0xFF;
-  response[answerOffset++] = DNS_TTL_SECONDS & 0xFF;
-
-  // Data Length
-  response[answerOffset++] = DNS_DATA_LENGTH_HIGH_BYTE;
-  response[answerOffset++] = DNS_IPV4_ADDRESS_LENGTH;
-
-  // Data: responseIP
-  response[answerOffset++] = responseIP[0];
-  response[answerOffset++] = responseIP[1];
-  response[answerOffset++] = responseIP[2];
-  response[answerOffset++] = responseIP[3];
-
-  // クライアントに送信
   udp.beginPacket(clientIP, clientPort);
-  udp.write(response, answerOffset);
+  udp.write(response, responseLen);
   udp.endPacket();
 }
 
@@ -215,7 +124,7 @@ void DNSFilterManager::forwardToUpstream(uint8_t* query, size_t len,
                                           IPAddress clientIP, uint16_t clientPort) {
   // 上流 DNS サーバーに転送
   WiFiUDP upstreamUdp;
-  upstreamUdp.beginPacket(upstreamDNS, DNS_PORT);
+  upstreamUdp.beginPacket(upstreamDNS, kDnsPort);
   upstreamUdp.write(query, len);
   upstreamUdp.endPacket();
 
@@ -224,8 +133,8 @@ void DNSFilterManager::forwardToUpstream(uint8_t* query, size_t len,
   while (millis() - startTime < DNS_FORWARD_TIMEOUT) {
     int packetSize = upstreamUdp.parsePacket();
     if (packetSize > 0) {
-      uint8_t response[DNS_MAX_PACKET_SIZE];
-      int responseLen = upstreamUdp.read(response, DNS_MAX_PACKET_SIZE);
+      uint8_t response[kDnsMaxPacketSize];
+      int responseLen = upstreamUdp.read(response, kDnsMaxPacketSize);
 
       // クライアントに転送
       udp.beginPacket(clientIP, clientPort);
@@ -244,77 +153,7 @@ void DNSFilterManager::forwardToUpstream(uint8_t* query, size_t len,
 }
 
 bool DNSFilterManager::loadBlocklistFromFile(const char* filepath) {
-  if (!LittleFS.exists(filepath)) {
-    Serial.printf("DNSFilterManager: ブロックリストファイルが見つかりません: %s\n", filepath);
-    return false;
-  }
-
-  File file = LittleFS.open(filepath, "r");
-  if (!file) {
-    Serial.println("DNSFilterManager: ブロックリストを開けませんでした");
-    return false;
-  }
-
-  clearBlocklist();
-
-  // バッファ割り当て
-  if (!blocklistBuffer) {
-    blocklistBuffer = (char*)malloc(BLOCKLIST_BUFFER_SIZE);
-    if (!blocklistBuffer) {
-      Serial.println("DNSFilterManager: メモリ割り当てに失敗しました");
-      file.close();
-      return false;
-    }
-    blocklistBufferSize = BLOCKLIST_BUFFER_SIZE;
-    blocklistBufferUsed = 0;
-  }
-
-  int count = 0;
-  while (file.available() && count < MAX_BLOCKLIST_SIZE) {
-    String line = file.readStringUntil('\n');
-    line.trim();
-
-    // 空行とコメント行をスキップ
-    if (line.length() == 0 || line.startsWith("#")) {
-      continue;
-    }
-
-    // hosts 形式の場合は IP 部分を削除
-    if (line.startsWith("0.0.0.0 ") || line.startsWith("127.0.0.1 ")) {
-      int spaceIdx = line.indexOf(' ');
-      if (spaceIdx > 0) {
-        line = line.substring(spaceIdx + 1);
-        line.trim();
-      }
-    }
-
-    // ブロックリストに追加
-    if (isValidDomain(line)) {
-      line.toLowerCase();
-
-      // 文字列プールに格納するための空き容量チェック
-      size_t domainLen = line.length() + 1;  // null終端を含む
-      if (blocklistBufferUsed + domainLen > blocklistBufferSize) {
-        Serial.println("DNSFilterManager: バッファが不足しています");
-        break;
-      }
-
-      // 文字列プールにコピー
-      char* domainPtr = blocklistBuffer + blocklistBufferUsed;
-      strcpy(domainPtr, line.c_str());
-      blocklist.push_back(domainPtr);
-
-      blocklistBufferUsed += domainLen;
-      count++;
-    }
-  }
-
-  file.close();
-  Serial.printf("DNSFilterManager: %s から %d ドメインを読み込みました\n", filepath, count);
-  Serial.printf("DNSFilterManager: バッファ使用量: %d / %d バイト (%.1f%%)\n",
-                blocklistBufferUsed, blocklistBufferSize,
-                (float)blocklistBufferUsed * 100.0 / blocklistBufferSize);
-  return true;
+  return blocklistStore.loadFromFile(filepath);
 }
 
 bool DNSFilterManager::reloadBlocklist() {
@@ -323,12 +162,11 @@ bool DNSFilterManager::reloadBlocklist() {
 }
 
 void DNSFilterManager::clearBlocklist() {
-  blocklist.clear();
-  blocklistBufferUsed = 0;  // バッファの使用量をリセット（再利用可能にする）
+  blocklistStore.clear();
 }
 
 int DNSFilterManager::getBlocklistCount() const {
-  return blocklist.size();
+  return blocklistStore.count();
 }
 
 void DNSFilterManager::setCaptivePortal(bool enable) {
@@ -356,27 +194,4 @@ DNSStats DNSFilterManager::getStats() const {
 void DNSFilterManager::resetStats() {
   stats = {0, 0, 0, 0};
   Serial.println("DNSFilterManager: 統計情報をリセットしました");
-}
-
-bool DNSFilterManager::isValidDomain(const String& domain) {
-  if (domain.length() < DOMAIN_NAME_MIN_LENGTH || domain.length() > DOMAIN_NAME_MAX_LENGTH) {
-    return false;
-  }
-
-  if (domain.indexOf(' ') >= 0 || domain.indexOf("..") >= 0) {
-    return false;
-  }
-
-  if (domain.indexOf('.') < 0) {
-    return false;
-  }
-
-  for (unsigned int i = 0; i < domain.length(); i++) {
-    char c = domain.charAt(i);
-    if (!isalnum(c) && c != '.' && c != '-' && c != '_') {
-      return false;
-    }
-  }
-
-  return true;
 }
