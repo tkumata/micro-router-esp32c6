@@ -65,7 +65,7 @@ void DNSBlocklistStore::clear() {
 }
 
 int DNSBlocklistStore::count() const {
-  return domains.size();
+  return static_cast<int>(domains.size());
 }
 
 bool DNSBlocklistStore::contains(const String& domain) const {
