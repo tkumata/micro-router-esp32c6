@@ -36,86 +36,6 @@
 #include "DNSFilterManager.h"  // Phase 8
 #include "Utils.h"
 
-// ===== 定数の実体定義 =====
-const char* AP_SSID = "micro-router-esp32c6";
-const uint8_t AP_CHANNEL = 6;
-const uint8_t AP_MAX_CONNECTIONS = 3;
-
-const IPAddress AP_IP(192, 168, 4, 1);
-const IPAddress AP_GATEWAY(192, 168, 4, 1);
-const IPAddress AP_SUBNET(255, 255, 255, 0);
-
-const unsigned long STA_RECONNECT_INTERVAL = 5000;
-const unsigned long STATUS_PRINT_INTERVAL = 10000;
-const unsigned long STA_CONNECTION_TIMEOUT = 30000;
-const unsigned long CONFIG_SAVE_DELAY = 5000;
-const unsigned long NAT_ENABLE_DELAY = 1000;
-
-const uint32_t MIN_FREE_HEAP_WARNING = 50000;
-
-const char* PREF_NAMESPACE = "wifi-config";
-const char* PREF_KEY_STA_SSID = "sta_ssid";
-const char* PREF_KEY_STA_PASSWORD = "sta_password";
-const char* PREF_KEY_AP_PASSWORD = "ap_password";
-const char* PREF_KEY_CONFIGURED = "configured";
-const char* PREF_KEY_AP_PASSWORD_SET = "ap_pw_set";
-const char* PREF_KEY_DNS_FILTER_ENABLED = "dns_filter_en";  // Phase 8
-
-const char* DEFAULT_AP_PASSWORD = "esp32c6router";
-
-// ===== Web サーバー設定 =====
-const uint16_t WEB_SERVER_PORT = 80;
-
-// ===== シリアル通信設定 =====
-const unsigned long SERIAL_STABILIZE_DELAY = 1000;
-
-// ===== 文字列長制限 =====
-const size_t WIFI_SSID_MAX_LENGTH = 32;
-const size_t WIFI_PASSWORD_MIN_LENGTH = 8;
-const size_t WIFI_PASSWORD_MAX_LENGTH = 64;
-const size_t WIFI_SSID_BUFFER_SIZE = 33;        // 32 + 1 (null終端)
-const size_t WIFI_PASSWORD_BUFFER_SIZE = 65;    // 64 + 1 (null終端)
-
-// ===== WiFi 接続設定 =====
-const uint8_t WIFI_SSID_HIDDEN = 0;
-const unsigned long WIFI_CONNECTION_CHECK_DELAY = 500;
-
-// ===== HTTP ステータスコード =====
-const uint16_t HTTP_STATUS_OK = 200;
-const uint16_t HTTP_STATUS_SEE_OTHER = 303;
-const uint16_t HTTP_STATUS_BAD_REQUEST = 400;
-const uint16_t HTTP_STATUS_NOT_FOUND = 404;
-const uint16_t HTTP_STATUS_INTERNAL_ERROR = 500;
-
-// ===== 単位換算定数 =====
-const uint32_t BYTES_TO_KB_DIVISOR = 1024;
-const uint32_t MILLISECONDS_TO_SECONDS_DIVISOR = 1000;
-const uint8_t PERCENTAGE_MULTIPLIER = 100;
-
-// ===== DNS 設定 =====
-const IPAddress DEFAULT_UPSTREAM_DNS(8, 8, 8, 8);
-const uint16_t DNS_FORWARD_TIMEOUT = 2000;
-const unsigned long DNS_POLLING_INTERVAL = 10;
-
-// ===== DNS パケット定数 =====
-const uint8_t DNS_COMPRESSION_POINTER_MASK = 0xC0;
-const uint8_t DNS_LABEL_MAX_LENGTH = 63;
-const uint8_t DNS_RESPONSE_FLAGS_BYTE2 = 0x81;
-const uint8_t DNS_RESPONSE_FLAGS_BYTE3 = 0x80;
-const uint16_t DNS_COMPRESSION_POINTER_QUERY = 0xC00C;
-const uint16_t DNS_TYPE_A = 0x0001;
-const uint16_t DNS_CLASS_IN = 0x0001;
-const uint32_t DNS_TTL_SECONDS = 300;
-const uint8_t DNS_IPV4_ADDRESS_LENGTH = 4;
-const IPAddress DNS_BLOCKED_IP(0, 0, 0, 0);
-
-// ===== ドメイン名検証定数 =====
-const size_t DOMAIN_NAME_MIN_LENGTH = 3;
-const size_t DOMAIN_NAME_MAX_LENGTH = 253;
-
-// ===== ブロックリストメモリ設定 =====
-const size_t BLOCKLIST_BUFFER_SIZE = 131072;  // 128KB（5000ドメイン×平均20文字×1.3倍の余裕）
-
 // ===== グローバル変数 =====
 WebServer server(WEB_SERVER_PORT);
 Preferences preferences;
@@ -130,7 +50,62 @@ bool natEnabled = false;                 // NAT 有効化済みフラグ
 bool needEnableNAT = false;              // NAT 有効化リクエストフラグ
 
 // ===== 関数プロトタイプ =====
-// (すべてヘッダーファイルに移動)
+void initializeFilesystem();
+void startMDNSResponder();
+void initializeDNSFilter();
+void updateCaptivePortalState();
+
+void initializeFilesystem() {
+  if (!LittleFS.begin(true)) {
+    Serial.println("LittleFS のマウントに失敗しました");
+    return;
+  }
+
+  Serial.println("LittleFS を正常にマウントしました");
+}
+
+void startMDNSResponder() {
+  if (MDNS.begin("micro-router")) {
+    Serial.println("mDNS レスポンダーを開始しました: http://micro-router.local");
+  } else {
+    Serial.println("mDNS のセットアップに失敗しました");
+  }
+}
+
+void initializeDNSFilter() {
+  if (!dnsFilter.begin()) {
+    Serial.println("DNS フィルタの起動に失敗しました");
+    return;
+  }
+
+  Serial.println("DNS フィルタを正常に起動しました");
+
+  bool dnsFilterEnabled = loadDNSFilterEnabled();
+  dnsFilter.setEnabled(dnsFilterEnabled);
+  Serial.printf("DNS フィルタ設定: %s\n", dnsFilterEnabled ? "有効" : "無効");
+
+  if (!config.configured || WiFi.status() != WL_CONNECTED) {
+    dnsFilter.setCaptivePortal(true);
+  }
+}
+
+void updateCaptivePortalState() {
+  if (!config.configured) {
+    if (!dnsFilter.isCaptivePortal()) {
+      dnsFilter.setCaptivePortal(true);
+    }
+    return;
+  }
+
+  bool currentlyConnected = (WiFi.status() == WL_CONNECTED);
+  if (currentlyConnected && dnsFilter.isCaptivePortal()) {
+    dnsFilter.setCaptivePortal(false);
+    Serial.println("Captive Portal: 無効化 (インターネット接続復帰)");
+  } else if (!currentlyConnected && !dnsFilter.isCaptivePortal()) {
+    dnsFilter.setCaptivePortal(true);
+    Serial.println("Captive Portal: 有効化 (インターネット接続ロスト)");
+  }
+}
 
 void setup() {
   // シリアル通信の初期化
@@ -142,11 +117,7 @@ void setup() {
   Serial.println();
 
   // LittleFS の初期化（Phase 8）
-  if (!LittleFS.begin(true)) {
-    Serial.println("LittleFS のマウントに失敗しました");
-  } else {
-    Serial.println("LittleFS を正常にマウントしました");
-  }
+  initializeFilesystem();
 
   // WiFi イベントハンドラの登録
   WiFi.onEvent(onWiFiEvent);
@@ -182,32 +153,10 @@ void setup() {
   setupWebServer();
 
   // mDNS の開始
-  if (MDNS.begin("micro-router")) {
-    Serial.println("mDNS レスポンダーを開始しました: http://micro-router.local");
-  } else {
-    Serial.println("mDNS のセットアップに失敗しました");
-  }
+  startMDNSResponder();
 
   // DNS フィルタの初期化（Phase 8）
-  if (dnsFilter.begin()) {
-    Serial.println("DNS フィルタを正常に起動しました");
-
-    // DNS フィルタ設定の読み込み
-    preferences.begin(PREF_NAMESPACE, true);
-    bool dnsFilterEnabled = preferences.getBool(PREF_KEY_DNS_FILTER_ENABLED, false);
-    preferences.end();
-
-    dnsFilter.setEnabled(dnsFilterEnabled);
-    Serial.printf("DNS フィルタ設定: %s\n", dnsFilterEnabled ? "有効" : "無効");
-    
-    // キャプティブポータルの初期状態設定
-    // 未設定 または 設定済みだが接続できていない場合は有効化
-    if (!config.configured || WiFi.status() != WL_CONNECTED) {
-      dnsFilter.setCaptivePortal(true);
-    }
-  } else {
-    Serial.println("DNS フィルタの起動に失敗しました");
-  }
+  initializeDNSFilter();
 
   Serial.println();
   printSeparator("セットアップ完了");
@@ -231,23 +180,8 @@ void loop() {
 
   // キャプティブポータルの状態管理
   // ネット接続がない場合は強制的に設定画面へ誘導する
-  if (config.configured) {
-    bool currentlyConnected = (WiFi.status() == WL_CONNECTED);
-    if (currentlyConnected && dnsFilter.isCaptivePortal()) {
-      dnsFilter.setCaptivePortal(false);
-      Serial.println("Captive Portal: 無効化 (インターネット接続復帰)");
-    } else if (!currentlyConnected && !dnsFilter.isCaptivePortal()) {
-      dnsFilter.setCaptivePortal(true);
-      Serial.println("Captive Portal: 有効化 (インターネット接続ロスト)");
-    }
-  } else {
-    // 未設定時は常に有効
-    if (!dnsFilter.isCaptivePortal()) {
-      dnsFilter.setCaptivePortal(true);
-    }
-  }
+  updateCaptivePortalState();
 
   // 定期的なステータス表示
   printPeriodicStatus();
 }
-

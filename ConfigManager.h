@@ -18,5 +18,7 @@ extern WifiConfig config;
 void loadConfig();
 void saveConfig(const char* ssid, const char* password);
 void saveAPPassword(const char* password);
+bool loadDNSFilterEnabled();
+void saveDNSFilterEnabled(bool enabled);
 
 #endif // CONFIG_MANAGER_H
