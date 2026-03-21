@@ -18,6 +18,18 @@ const char* BLOCKLIST_PATH = "/blocklist.txt";
 const char* BLOCKLIST_UPLOAD_PATH = "/blocklist.txt.tmp";
 const char* BLOCKLIST_BACKUP_PATH = "/blocklist.txt.bak";
 
+struct BlocklistUploadState {
+  bool failed;
+  String message;
+};
+
+BlocklistUploadState gBlocklistUploadState = {false, ""};
+
+void markBlocklistUploadFailure(const String& message) {
+  gBlocklistUploadState.failed = true;
+  gBlocklistUploadState.message = message;
+}
+
 void restartDeviceWithLog(const char* logTitle) {
   Serial.println();
   Serial.println("========================================");
@@ -51,9 +63,13 @@ bool replaceBlocklistFile() {
     return true;
   }
 
+  LittleFS.remove(BLOCKLIST_UPLOAD_PATH);
+
   // 失敗時は、可能であればバックアップからロールバック
   if (backupCreated && LittleFS.exists(BLOCKLIST_BACKUP_PATH)) {
-    LittleFS.rename(BLOCKLIST_BACKUP_PATH, BLOCKLIST_PATH);
+    if (!LittleFS.rename(BLOCKLIST_BACKUP_PATH, BLOCKLIST_PATH)) {
+      return false;
+    }
   }
 
   return false;
@@ -77,7 +93,12 @@ void setupWebServer() {
   server.on("/download-blocklist", HTTP_GET, handleDownloadBlocklist);
   server.on("/upload-blocklist", HTTP_POST,
     []() {
-      server.send(HTTP_STATUS_OK, "text/html", buildUploadSuccessPage());
+      if (gBlocklistUploadState.failed) {
+        server.send(HTTP_STATUS_INTERNAL_ERROR, "text/html",
+                    buildSimpleMessagePage("アップロード失敗", gBlocklistUploadState.message, "/dns-filter"));
+      } else {
+        server.send(HTTP_STATUS_OK, "text/html", buildUploadSuccessPage());
+      }
     },
     handleUploadBlocklist
   );
@@ -204,32 +225,70 @@ void handleUploadBlocklist() {
   HTTPUpload& upload = server.upload();
 
   if (upload.status == UPLOAD_FILE_START) {
+    gBlocklistUploadState.failed = false;
+    gBlocklistUploadState.message = "";
+    uploadFile = File();
     Serial.printf("アップロード開始: %s\n", upload.filename.c_str());
+    LittleFS.remove(BLOCKLIST_UPLOAD_PATH);
     uploadFile = LittleFS.open(BLOCKLIST_UPLOAD_PATH, "w");
     if (!uploadFile) {
       Serial.println("一時ファイルのオープンに失敗");
+      markBlocklistUploadFailure("一時ファイルを開けませんでした。空き容量とファイルシステムの状態を確認してください。");
     }
   }
   else if (upload.status == UPLOAD_FILE_WRITE) {
     if (uploadFile) {
-      uploadFile.write(upload.buf, upload.currentSize);
+      size_t written = uploadFile.write(upload.buf, upload.currentSize);
+      if (written != upload.currentSize) {
+        Serial.println("一時ファイルへの書き込みに失敗");
+        uploadFile.close();
+        uploadFile = File();
+        LittleFS.remove(BLOCKLIST_UPLOAD_PATH);
+        markBlocklistUploadFailure("ブロックリストの書き込みに失敗しました。");
+      }
     }
   }
   else if (upload.status == UPLOAD_FILE_END) {
+    if (!uploadFile) {
+      if (!gBlocklistUploadState.failed) {
+        markBlocklistUploadFailure("アップロードファイルを処理できませんでした。");
+      }
+      return;
+    }
+
+    uploadFile.close();
+    uploadFile = File();
+    Serial.printf("アップロード完了: %d バイト\n", upload.totalSize);
+
+    if (gBlocklistUploadState.failed) {
+      LittleFS.remove(BLOCKLIST_UPLOAD_PATH);
+      return;
+    }
+
+    // バックアップして置換
+    if (!replaceBlocklistFile()) {
+      Serial.println("ブロックリストの置換に失敗しました");
+      markBlocklistUploadFailure("ブロックリストの置換に失敗しました。");
+      return;
+    }
+
+    // リロード
+    if (!dnsFilter.reloadBlocklist()) {
+      Serial.println("ブロックリストの再読み込みに失敗しました");
+      markBlocklistUploadFailure("ブロックリストの再読み込みに失敗しました。");
+      return;
+    }
+
+    Serial.println("ブロックリストを更新しました");
+  }
+  else if (upload.status == UPLOAD_FILE_ABORTED) {
     if (uploadFile) {
       uploadFile.close();
-      Serial.printf("アップロード完了: %d バイト\n", upload.totalSize);
-
-      // バックアップして置換
-      if (!replaceBlocklistFile()) {
-        Serial.println("ブロックリストの置換に失敗しました");
-        return;
-      }
-
-      // リロード
-      dnsFilter.reloadBlocklist();
-      Serial.println("ブロックリストを更新しました");
+      uploadFile = File();
     }
+    LittleFS.remove(BLOCKLIST_UPLOAD_PATH);
+    Serial.println("アップロードが中断されました");
+    markBlocklistUploadFailure("アップロードが中断されました。");
   }
 }
 

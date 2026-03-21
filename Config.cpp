@@ -53,6 +53,7 @@ const IPAddress DEFAULT_UPSTREAM_DNS(8, 8, 8, 8);
 const uint16_t DNS_FORWARD_TIMEOUT = 2000;
 const unsigned long DNS_POLLING_INTERVAL = 10;
 
+const size_t DNS_HEADER_SIZE = 12;
 const uint8_t DNS_COMPRESSION_POINTER_MASK = 0xC0;
 const uint8_t DNS_LABEL_MAX_LENGTH = 63;
 const uint8_t DNS_RESPONSE_FLAGS_BYTE2 = 0x81;

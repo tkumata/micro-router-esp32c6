@@ -6,21 +6,21 @@
 #include "Config.h"
 
 namespace {
-constexpr size_t kDnsHeaderSize = 12;
 constexpr size_t kDnsMaxPacketSize = 512;
+constexpr size_t kDnsIPv4AnswerSize = 16;
 constexpr uint8_t kDnsAnswerCountHighByte = 0x00;
 constexpr uint8_t kDnsAnswerCountLowByte = 0x01;
 constexpr uint8_t kDnsDataLengthHighByte = 0x00;
 }
 
-String DNSPacketCodec::extractDomainFromQuery(uint8_t* packet, size_t len) {
-  if (len < kDnsHeaderSize) {
+String DNSPacketCodec::extractDomainFromQuery(const uint8_t* packet, size_t len) {
+  if (len < DNS_HEADER_SIZE) {
     return "";
   }
 
   String domain;
-  uint8_t* ptr = packet + kDnsHeaderSize;
-  uint8_t* end = packet + len;
+  const uint8_t* ptr = packet + DNS_HEADER_SIZE;
+  const uint8_t* end = packet + len;
 
   while (ptr < end && *ptr != 0) {
     uint8_t labelLen = *ptr++;
@@ -47,7 +47,7 @@ String DNSPacketCodec::extractDomainFromQuery(uint8_t* packet, size_t len) {
 }
 
 size_t DNSPacketCodec::buildIPv4Response(uint8_t* response, const uint8_t* query, size_t queryLen, IPAddress responseIP) {
-  if (queryLen > kDnsMaxPacketSize) {
+  if (queryLen < DNS_HEADER_SIZE || queryLen > (kDnsMaxPacketSize - kDnsIPv4AnswerSize)) {
     return 0;
   }
 

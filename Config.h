@@ -79,6 +79,7 @@ extern const uint16_t DNS_FORWARD_TIMEOUT;           // DNS 転送タイムア�
 extern const unsigned long DNS_POLLING_INTERVAL;     // DNS ポーリング間隔（ミリ秒）
 
 // ===== DNS パケット定数 =====
+extern const size_t DNS_HEADER_SIZE;                // DNS ヘッダ長（12バイト）
 extern const uint8_t DNS_COMPRESSION_POINTER_MASK;   // DNS 圧縮ポインタマスク（0xC0）
 extern const uint8_t DNS_LABEL_MAX_LENGTH;           // DNS ラベル最大長（63）
 extern const uint8_t DNS_RESPONSE_FLAGS_BYTE2;       // DNS 応答フラグ byte 2（0x81）

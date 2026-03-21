@@ -44,10 +44,6 @@ void DNSFilterManager::end() {
 }
 
 void DNSFilterManager::handleClient() {
-  if (!enabled) {
-    return;
-  }
-
   int packetSize = udp.parsePacket();
   if (packetSize == 0) {
     return;  // パケット無し
@@ -61,7 +57,7 @@ void DNSFilterManager::handleClient() {
   uint8_t packet[kDnsMaxPacketSize];
   int len = udp.read(packet, kDnsMaxPacketSize);
 
-  if (len < 12) {
+  if (len < static_cast<int>(DNS_HEADER_SIZE)) {
     Serial.println("DNSFilterManager: 不正な DNS パケット（サイズ不足）");
     stats.errorQueries++;
     return;
@@ -88,6 +84,13 @@ void DNSFilterManager::handleClient() {
     // 通常のDNSクエリとして来た場合も、AP_IPを返せば設定画面が開くのでOK。
     Serial.printf("CaptivePortal: %s -> %s\n", domain.c_str(), AP_IP.toString().c_str());
     sendCustomIPResponse(packet, len, clientIP, clientPort, AP_IP);
+    return;
+  }
+
+  if (!enabled) {
+    Serial.printf("DNSFilterManager: フィルタ無効のため上流転送 %s\n", domain.c_str());
+    stats.allowedQueries++;
+    forwardToUpstream(packet, len, clientIP, clientPort);
     return;
   }
 

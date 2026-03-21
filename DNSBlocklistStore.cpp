@@ -23,13 +23,13 @@ DNSBlocklistStore::~DNSBlocklistStore() {
 
 bool DNSBlocklistStore::loadFromFile(const char* filepath) {
   if (!LittleFS.exists(filepath)) {
-    Serial.printf("DNSFilterManager: ブロックリストファイルが見つかりません: %s\n", filepath);
+    Serial.printf("DNSBlocklistStore: ブロックリストファイルが見つかりません: %s\n", filepath);
     return false;
   }
 
   File file = LittleFS.open(filepath, "r");
   if (!file) {
-    Serial.println("DNSFilterManager: ブロックリストを開けませんでした");
+    Serial.println("DNSBlocklistStore: ブロックリストを開けませんでした");
     return false;
   }
 
@@ -53,8 +53,8 @@ bool DNSBlocklistStore::loadFromFile(const char* filepath) {
   }
 
   file.close();
-  Serial.printf("DNSFilterManager: %s から %d ドメインを読み込みました\n", filepath, countValue);
-  Serial.printf("DNSFilterManager: バッファ使用量: %d / %d バイト (%.1f%%)\n",
+  Serial.printf("DNSBlocklistStore: %s から %d ドメインを読み込みました\n", filepath, countValue);
+  Serial.printf("DNSBlocklistStore: バッファ使用量: %d / %d バイト (%.1f%%)\n",
                 bufferUsed, bufferSize, (float)bufferUsed * 100.0 / bufferSize);
   return true;
 }
@@ -93,7 +93,7 @@ bool DNSBlocklistStore::ensureBuffer() {
 
   buffer = static_cast<char*>(malloc(BLOCKLIST_BUFFER_SIZE));
   if (!buffer) {
-    Serial.println("DNSFilterManager: メモリ割り当てに失敗しました");
+    Serial.println("DNSBlocklistStore: メモリ割り当てに失敗しました");
     return false;
   }
 
@@ -146,7 +146,7 @@ bool DNSBlocklistStore::normalizeLine(String& line) const {
 bool DNSBlocklistStore::appendDomain(const String& domain) {
   size_t domainLen = domain.length() + 1;
   if (bufferUsed + domainLen > bufferSize) {
-    Serial.println("DNSFilterManager: バッファが不足しています");
+    Serial.println("DNSBlocklistStore: バッファが不足しています");
     return false;
   }
 
