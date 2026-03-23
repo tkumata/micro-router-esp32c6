@@ -16,8 +16,8 @@ extern WifiConfig config;
 
 // 設定管理関数
 void loadConfig();
-void saveConfig(const char* ssid, const char* password);
-void saveAPPassword(const char* password);
+bool saveConfig(const char* ssid, const char* password);
+bool saveAPPassword(const char* password);
 bool loadDNSFilterEnabled();
 void saveDNSFilterEnabled(bool enabled);
 

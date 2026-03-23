@@ -20,6 +20,9 @@ const char* PREF_NAMESPACE = "wifi-config";
 const char* PREF_KEY_STA_SSID = "sta_ssid";
 const char* PREF_KEY_STA_PASSWORD = "sta_password";
 const char* PREF_KEY_AP_PASSWORD = "ap_password";
+const char* PREF_KEY_STA_SSID_ENC = "sta_ssid_enc";
+const char* PREF_KEY_STA_PASSWORD_ENC = "sta_pwd_enc";
+const char* PREF_KEY_AP_PASSWORD_ENC = "ap_pwd_enc";
 const char* PREF_KEY_CONFIGURED = "configured";
 const char* PREF_KEY_AP_PASSWORD_SET = "ap_pw_set";
 const char* PREF_KEY_DNS_FILTER_ENABLED = "dns_filter_en";
@@ -42,6 +45,7 @@ const unsigned long WIFI_CONNECTION_CHECK_DELAY = 500;
 const uint16_t HTTP_STATUS_OK = 200;
 const uint16_t HTTP_STATUS_SEE_OTHER = 303;
 const uint16_t HTTP_STATUS_BAD_REQUEST = 400;
+const uint16_t HTTP_STATUS_FORBIDDEN = 403;
 const uint16_t HTTP_STATUS_NOT_FOUND = 404;
 const uint16_t HTTP_STATUS_INTERNAL_ERROR = 500;
 
@@ -50,7 +54,7 @@ const uint32_t MILLISECONDS_TO_SECONDS_DIVISOR = 1000;
 const uint8_t PERCENTAGE_MULTIPLIER = 100;
 
 const IPAddress DEFAULT_UPSTREAM_DNS(8, 8, 8, 8);
-const uint16_t DNS_FORWARD_TIMEOUT = 2000;
+const uint16_t DNS_FORWARD_TIMEOUT = 500;
 const unsigned long DNS_POLLING_INTERVAL = 10;
 
 const size_t DNS_HEADER_SIZE = 12;
@@ -69,3 +73,4 @@ const size_t DOMAIN_NAME_MIN_LENGTH = 3;
 const size_t DOMAIN_NAME_MAX_LENGTH = 253;
 
 const size_t BLOCKLIST_BUFFER_SIZE = 131072;
+const size_t BLOCKLIST_UPLOAD_MAX_SIZE = 131072;

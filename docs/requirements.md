@@ -39,10 +39,10 @@
 
 ### 4.1 インターフェース設定
 
-| Interface         | Role         | IP Assignment | Default Config                               |
-| :---------------- | :----------- | :------------ | :------------------------------------------- |
-| **STA (Station)** | Upstream WAN | DHCP Client   | Connects to existing home router             |
-| **AP (SoftAP)**   | LAN Gateway  | Static IP     | IP: `192.168.4.1`<br>Subnet: `255.255.255.0` |
+| Interface         | Role         | IP Assignment | Default Config                            |
+| :---------------- | :----------- | :------------ | :---------------------------------------- |
+| **STA (Station)** | Upstream WAN | DHCP Client   | Connects to existing home router          |
+| **AP (SoftAP)**   | LAN Gateway  | Static IP     | IP: `192.168.4.1` Subnet: `255.255.255.0` |
 
 ### 4.2 DHCP サーバ (LAN)
 
@@ -78,11 +78,18 @@ UDP ポート 53 で動作するカスタム DNS プロキシです。
 
 `http://192.168.4.1` (または `http://micro-router.local`) でアクセス可能です。
 
+- AP パスワードが初期値 `esp32c6router` の間は、通常の Web UI ではなく AP パスワード変更専用画面を表示します。
+- AP パスワード変更後は、フォームログインとセッション cookie による認証を要求します。
+- ログインに使う秘密情報は現在の AP パスワードです。
+
 ### 6.1 エンドポイント
 
 | Method | Path                  | Description                                             |
 | :----- | :-------------------- | :------------------------------------------------------ |
 | `GET`  | `/`                   | **Dashboard**: Status, Wi-Fi setup, AP password change. |
+| `GET`  | `/login`              | **Login**: Web UI ログイン画面。                        |
+| `POST` | `/login`              | Creates a session after AP password verification.       |
+| `POST` | `/logout`             | Clears the current Web UI session.                      |
 | `POST` | `/save`               | Saves STA credentials and reboots.                      |
 | `POST` | `/save_ap_password`   | Saves new AP password and reboots.                      |
 | `GET`  | `/dns-filter`         | **DNS Filter**: Stats, toggle switch, upload form.      |
@@ -90,32 +97,44 @@ UDP ポート 53 で動作するカスタム DNS プロキシです。
 | `POST` | `/upload-blocklist`   | Uploads `domain.txt` (multipart/form-data).             |
 | `GET`  | `/download-blocklist` | Downloads the current blocklist.                        |
 
+- 状態変更系エンドポイントでは、セッション確認に加えて CSRF トークン検証と `Origin` / `Referer` 検証を行います。
+- AP パスワード変更後の既存セッションは破棄し、再ログインを要求します。
+- ブロックリスト upload は AP サブネットからの要求に限定し、サイズ上限は `128KB` とします。
+
 ## 7. 設定の永続化 (NVS)
 
 設定は `wifi-config` 名前空間に保存されます。
 
-| Key             | Type   | Description                             |
-| :-------------- | :----- | :-------------------------------------- |
-| `sta_ssid`      | String | Upstream Wi-Fi SSID (max 32 chars).     |
-| `sta_password`  | String | Upstream Wi-Fi Password (max 64 chars). |
-| `ap_password`   | String | Custom AP Password (min 8 chars).       |
-| `configured`    | Bool   | `true` if STA credentials are set.      |
-| `ap_pw_set`     | Bool   | `true` if custom AP password is set.    |
-| `dns_filter_en` | Bool   | `true` if DNS filtering is enabled.     |
+| Key             | Type   | Description                                     |
+| :-------------- | :----- | :---------------------------------------------- |
+| `sta_ssid_enc`  | String | 端末固有鍵で暗号化した Upstream Wi-Fi SSID.     |
+| `sta_pwd_enc`   | String | 端末固有鍵で暗号化した Upstream Wi-Fi Password. |
+| `ap_pwd_enc`    | String | 端末固有鍵で暗号化した Custom AP Password.      |
+| `configured`    | Bool   | `true` if STA credentials are set.              |
+| `ap_pw_set`     | Bool   | `true` if custom AP password is set.            |
+| `dns_filter_en` | Bool   | `true` if DNS filtering is enabled.             |
+
+旧バージョンの `sta_ssid`, `sta_password`, `ap_password` は互換目的で読み込みのみ対応し、起動時に暗号化形式へ自動移行されます。
 
 ## 8. 起動シーケンス
 
-1.  **初期化:** シリアル、LittleFS、Preferences の初期化。
-2.  **設定確認:** NVS から設定をロード。
-3.  **モード選択:**
-    - **設定済み:** STA 接続開始 + AP 起動。
-    - **未設定:** AP 起動のみ。
-4.  **サービス:** Web サーバ、DNS フィルタ (プロキシ)、mDNS の開始。
-5.  **イベントループ:**
-    - STA が IP 取得 -> NAT 有効化。
-    - STA 切断 -> 再試行ループ (5 秒間隔)。
-    - DNS パケット処理。
-    - Web リクエスト処理。
+1. **初期化:** シリアル、LittleFS、Preferences の初期化。
+2. **設定確認:** NVS から設定をロード。
+3. **モード選択:**
+   - **設定済み:** STA 接続開始 + AP 起動。
+   - **未設定:** AP 起動のみ。
+4. **サービス:** Web サーバ、DNS フィルタ (プロキシ)、mDNS の開始。
+5. **イベントループ:**
+   - STA が IP 取得 -> NAT 有効化。
+   - STA 切断 -> 再試行ループ (5 秒間隔)。
+   - DNS パケット処理。
+   - Web リクエスト処理。
+
+### 7.1 保存保護
+
+- `sta_ssid_enc`、`sta_pwd_enc`、`ap_pwd_enc` は端末固有鍵で暗号化して保存されます。
+- 暗号化鍵はデバイス固有情報から導出されるため、他個体へ保存領域を複製してもそのまま復号できません。
+- 旧平文キーは後方互換のため読み込みのみ許可し、起動時に暗号化形式へ自動移行されます。
 
 ## 9. パフォーマンスと制限
 
@@ -125,6 +144,8 @@ UDP ポート 53 で動作するカスタム DNS プロキシです。
 | **Latency**          | < 10ms added latency                           |
 | **Free Heap**        | Maintenance target > 50 KB (Typically ~200 KB) |
 | **Boot Time**        | < 5 seconds                                    |
+
+- 上流 DNS 応答待ちは最大 `500ms` に制限します。
 
 ## 10. 開発環境
 

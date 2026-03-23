@@ -35,6 +35,9 @@ extern const char* PREF_NAMESPACE;
 extern const char* PREF_KEY_STA_SSID;
 extern const char* PREF_KEY_STA_PASSWORD;
 extern const char* PREF_KEY_AP_PASSWORD;
+extern const char* PREF_KEY_STA_SSID_ENC;
+extern const char* PREF_KEY_STA_PASSWORD_ENC;
+extern const char* PREF_KEY_AP_PASSWORD_ENC;
 extern const char* PREF_KEY_CONFIGURED;
 extern const char* PREF_KEY_AP_PASSWORD_SET;
 
@@ -65,6 +68,7 @@ extern const unsigned long WIFI_CONNECTION_CHECK_DELAY; // WiFi 接続待機時�
 extern const uint16_t HTTP_STATUS_OK;                // 200 OK
 extern const uint16_t HTTP_STATUS_SEE_OTHER;         // 303 See Other
 extern const uint16_t HTTP_STATUS_BAD_REQUEST;       // 400 Bad Request
+extern const uint16_t HTTP_STATUS_FORBIDDEN;         // 403 Forbidden
 extern const uint16_t HTTP_STATUS_NOT_FOUND;         // 404 Not Found
 extern const uint16_t HTTP_STATUS_INTERNAL_ERROR;    // 500 Internal Server Error
 
@@ -97,5 +101,6 @@ extern const size_t DOMAIN_NAME_MAX_LENGTH;          // ドメイン名最大長
 
 // ===== ブロックリストメモリ設定 =====
 extern const size_t BLOCKLIST_BUFFER_SIZE;           // ブロックリスト文字列プールサイズ（バイト）
+extern const size_t BLOCKLIST_UPLOAD_MAX_SIZE;       // ブロックリストアップロード最大サイズ（バイト）
 
 #endif // CONFIG_H

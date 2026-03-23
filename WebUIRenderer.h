@@ -13,7 +13,9 @@
 String buildSimpleMessagePage(const String& title, const String& message, const String& backPath = "/");
 String buildRestartNoticePage(const String& title, const String& message);
 String buildUploadSuccessPage();
-String renderRootPage();
-String renderDNSFilterPage(const DNSStats& stats, int blocklistCount, bool enabled);
+String renderLoginPage(const String& csrfToken, const String& redirectPath = "/", const String& message = "");
+String renderForcePasswordChangePage(const String& csrfToken);
+String renderRootPage(const String& csrfToken);
+String renderDNSFilterPage(const DNSStats& stats, int blocklistCount, bool enabled, const String& csrfToken);
 
 #endif // WEB_UI_RENDERER_H

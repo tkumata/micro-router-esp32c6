@@ -51,6 +51,8 @@
 
 - [x] Custom AP password support.
 - [x] Password saved in NVS.
+- [x] Wi-Fi 認証情報の暗号化保存。
+- [x] 旧平文設定の自動移行。
 
 ### Phase 8: DNS フィルタリング (広告ブロック)
 
