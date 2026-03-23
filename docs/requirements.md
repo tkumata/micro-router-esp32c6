@@ -96,12 +96,14 @@ UDP ポート 53 で動作するカスタム DNS プロキシです。
 
 | Key             | Type   | Description                             |
 | :-------------- | :----- | :-------------------------------------- |
-| `sta_ssid`      | String | Upstream Wi-Fi SSID (max 32 chars).     |
-| `sta_password`  | String | Upstream Wi-Fi Password (max 64 chars). |
-| `ap_password`   | String | Custom AP Password (min 8 chars).       |
+| `sta_ssid_enc`  | String | 端末固有鍵で暗号化した Upstream Wi-Fi SSID.     |
+| `sta_pwd_enc`   | String | 端末固有鍵で暗号化した Upstream Wi-Fi Password. |
+| `ap_pwd_enc`    | String | 端末固有鍵で暗号化した Custom AP Password.      |
 | `configured`    | Bool   | `true` if STA credentials are set.      |
 | `ap_pw_set`     | Bool   | `true` if custom AP password is set.    |
 | `dns_filter_en` | Bool   | `true` if DNS filtering is enabled.     |
+
+旧バージョンの `sta_ssid`, `sta_password`, `ap_password` は互換目的で読み込みのみ対応し、起動時に暗号化形式へ自動移行されます。
 
 ## 8. 起動シーケンス
 
@@ -116,6 +118,12 @@ UDP ポート 53 で動作するカスタム DNS プロキシです。
     - STA 切断 -> 再試行ループ (5 秒間隔)。
     - DNS パケット処理。
     - Web リクエスト処理。
+
+### 7.1 保存保護
+
+- `sta_ssid_enc`、`sta_pwd_enc`、`ap_pwd_enc` は端末固有鍵で暗号化して保存されます。
+- 暗号化鍵はデバイス固有情報から導出されるため、他個体へ保存領域を複製してもそのまま復号できません。
+- 旧平文キーは後方互換のため読み込みのみ許可し、起動時に暗号化形式へ自動移行されます。
 
 ## 9. パフォーマンスと制限
 

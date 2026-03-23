@@ -51,6 +51,8 @@
 
 - [x] Custom AP password support.
 - [x] Password saved in NVS.
+- [x] Wi-Fi 認証情報の暗号化保存。
+- [x] 旧平文設定の自動移行。
 
 ### Phase 8: DNS フィルタリング (広告ブロック)
 
@@ -68,6 +70,8 @@
 ## 将来のロードマップ (Wishlist)
 
 - [ ] **HTTPS / TLS Support**: Secure the Web UI (Self-signed certs).
+- [ ] **Web UI 認証**: 設定変更 API への認証導入。
+- [ ] **CSRF 対策**: 設定変更フォームへのトークン導入。
 - [ ] **Wildcard Blocking**: Support `*.example.com` in blocklists (requires Trie implementation).
 - [ ] **Traffic Stats**: Visual graphs for bandwidth usage.
 - [ ] **OTA Update**: Firmware update via Web UI.

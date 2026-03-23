@@ -35,6 +35,9 @@ extern const char* PREF_NAMESPACE;
 extern const char* PREF_KEY_STA_SSID;
 extern const char* PREF_KEY_STA_PASSWORD;
 extern const char* PREF_KEY_AP_PASSWORD;
+extern const char* PREF_KEY_STA_SSID_ENC;
+extern const char* PREF_KEY_STA_PASSWORD_ENC;
+extern const char* PREF_KEY_AP_PASSWORD_ENC;
 extern const char* PREF_KEY_CONFIGURED;
 extern const char* PREF_KEY_AP_PASSWORD_SET;
 

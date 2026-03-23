@@ -154,7 +154,11 @@ void handleSave() {
   }
 
   // 設定保存
-  saveConfig(ssid.c_str(), password.c_str());
+  if (!saveConfig(ssid.c_str(), password.c_str())) {
+    server.send(HTTP_STATUS_INTERNAL_ERROR, "text/html",
+                buildSimpleMessagePage("エラー", "設定の暗号化保存に失敗しました。"));
+    return;
+  }
 
   // 成功ページ
   server.send(HTTP_STATUS_OK, "text/html",
@@ -177,7 +181,11 @@ void handleSaveAPPassword() {
   }
 
   // AP パスワード保存
-  saveAPPassword(apPassword.c_str());
+  if (!saveAPPassword(apPassword.c_str())) {
+    server.send(HTTP_STATUS_INTERNAL_ERROR, "text/html",
+                buildSimpleMessagePage("エラー", "AP パスワードの暗号化保存に失敗しました。"));
+    return;
+  }
 
   // 成功ページ
   server.send(HTTP_STATUS_OK, "text/html",
