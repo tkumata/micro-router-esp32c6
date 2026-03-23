@@ -34,5 +34,7 @@
 ## セキュリティ要件
 
 - 状態変更系 POST はすべて CSRF トークン検証を行う。
-- `Origin` または `Referer` が AP 自身でない場合は拒否する。
+- `Origin` または `Referer` は `192.168.4.1` と `micro-router.local` を許可ホストとして検証し、それ以外は拒否する。
 - セッション cookie 不一致、未送信、期限切れは未認証として扱う。
+- `redirect_to` は Web UI 内の相対パスのみを許可し、HTML 属性値として埋め込む際はエスケープする。
+- `POST /upload-blocklist` の CSRF トークンは multipart/form-data の hidden フィールドで送る。

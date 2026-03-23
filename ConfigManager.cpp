@@ -127,9 +127,13 @@ bool encryptStringForStorage(const String& plaintext, String& encryptedValue) {
   uint8_t iv[ENCRYPTION_IV_SIZE];
   fillRandomBytes(iv, sizeof(iv));
 
+  size_t plaintextLen = plaintext.length();
+  if (plaintextLen >= WIFI_PASSWORD_BUFFER_SIZE) {
+    return false;
+  }
+
   uint8_t ciphertext[WIFI_PASSWORD_BUFFER_SIZE];
   memset(ciphertext, 0, sizeof(ciphertext));
-  size_t plaintextLen = plaintext.length();
   memcpy(ciphertext, plaintext.c_str(), plaintextLen);
 
   mbedtls_aes_context aes;

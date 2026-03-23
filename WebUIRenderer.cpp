@@ -24,6 +24,37 @@ String calculatePercentText(uint32_t value, uint32_t total) {
   }
   return " (" + String(static_cast<uint64_t>(value) * PERCENTAGE_MULTIPLIER / total) + "%)";
 }
+
+String escapeHtmlAttribute(const String& value) {
+  String escaped;
+  escaped.reserve(value.length());
+
+  for (size_t index = 0; index < value.length(); ++index) {
+    char c = value.charAt(index);
+    switch (c) {
+      case '&':
+        escaped += "&amp;";
+        break;
+      case '"':
+        escaped += "&quot;";
+        break;
+      case '\'':
+        escaped += "&#39;";
+        break;
+      case '<':
+        escaped += "&lt;";
+        break;
+      case '>':
+        escaped += "&gt;";
+        break;
+      default:
+        escaped += c;
+        break;
+    }
+  }
+
+  return escaped;
+}
 }
 
 const char HTML_COMMON_CSS[] PROGMEM = R"rawliteral(
@@ -200,7 +231,8 @@ DNS フィルタを有効にする
 </div>
 <div class='status'>
 <h2>ブロックリスト管理</h2>
-<form method='POST' action='/upload-blocklist?csrf_token=%CSRF_TOKEN%' enctype='multipart/form-data'>
+<form method='POST' action='/upload-blocklist' enctype='multipart/form-data'>
+<input type='hidden' name='csrf_token' value='%CSRF_TOKEN%'>
 <label>domain.txt をアップロード:</label><br>
 <input type='file' name='blocklist' accept='.txt' required><br><br>
 <button type='submit'>アップロード</button>
@@ -257,7 +289,7 @@ String renderLoginPage(const String& csrfToken, const String& redirectPath, cons
   html.replace("%CSS%", FPSTR(HTML_COMMON_CSS));
   html.replace("%MESSAGE_BLOCK%", messageBlock);
   html.replace("%CSRF_TOKEN%", csrfToken);
-  html.replace("%REDIRECT_PATH%", redirectPath);
+  html.replace("%REDIRECT_PATH%", escapeHtmlAttribute(redirectPath));
   html.replace("%PASSWORD_MIN%", String(WIFI_PASSWORD_MIN_LENGTH));
   html.replace("%PASSWORD_MAX%", String(WIFI_PASSWORD_MAX_LENGTH));
   return html;

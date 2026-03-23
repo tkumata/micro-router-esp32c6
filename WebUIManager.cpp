@@ -21,6 +21,7 @@ const char* BLOCKLIST_UPLOAD_PATH = "/blocklist.txt.tmp";
 const char* BLOCKLIST_BACKUP_PATH = "/blocklist.txt.bak";
 const char* CSRF_TOKEN_ARG = "csrf_token";
 const char* SESSION_COOKIE_NAME = "mr_session";
+const char* TRUSTED_WEB_UI_HOSTS[] = {"192.168.4.1", "micro-router.local"};
 const char* WEB_UI_HEADER_NAMES[] = {"Origin", "Referer", "Cookie"};
 const unsigned long SESSION_TIMEOUT = 15UL * 60UL * 1000UL;
 
@@ -89,7 +90,71 @@ String extractCookieValue(const String& cookieHeader, const String& cookieName) 
 }
 
 bool isSafeRedirectPath(const String& path) {
-  return path.length() > 0 && path.startsWith("/") && !path.startsWith("//");
+  if (path.length() == 0 || !path.startsWith("/") || path.startsWith("//")) {
+    return false;
+  }
+
+  for (size_t index = 0; index < path.length(); ++index) {
+    char c = path.charAt(index);
+    bool isAlphaNumeric = (c >= 'a' && c <= 'z') ||
+                          (c >= 'A' && c <= 'Z') ||
+                          (c >= '0' && c <= '9');
+    bool isAllowedSymbol = c == '/' || c == '-' || c == '_' || c == '.' ||
+                           c == '~' || c == '?' || c == '&' || c == '=' ||
+                           c == '%' || c == '+' || c == '#';
+    if (!isAlphaNumeric && !isAllowedSymbol) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool isTrustedWebUiHost(const String& host) {
+  for (size_t index = 0; index < sizeof(TRUSTED_WEB_UI_HOSTS) / sizeof(TRUSTED_WEB_UI_HOSTS[0]); ++index) {
+    if (host.equalsIgnoreCase(TRUSTED_WEB_UI_HOSTS[index])) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool extractHostFromHttpUrl(const String& url, String& host) {
+  int schemeSeparator = url.indexOf("://");
+  if (schemeSeparator < 0) {
+    return false;
+  }
+
+  String scheme = url.substring(0, schemeSeparator);
+  scheme.toLowerCase();
+  if (scheme != "http") {
+    return false;
+  }
+
+  int hostStart = schemeSeparator + 3;
+  int hostEnd = url.indexOf('/', hostStart);
+  if (hostEnd < 0) {
+    hostEnd = url.length();
+  }
+
+  int queryStart = url.indexOf('?', hostStart);
+  if (queryStart >= 0 && queryStart < hostEnd) {
+    hostEnd = queryStart;
+  }
+
+  int fragmentStart = url.indexOf('#', hostStart);
+  if (fragmentStart >= 0 && fragmentStart < hostEnd) {
+    hostEnd = fragmentStart;
+  }
+
+  host = url.substring(hostStart, hostEnd);
+  int portSeparator = host.indexOf(':');
+  if (portSeparator >= 0) {
+    host = host.substring(0, portSeparator);
+  }
+
+  return host.length() > 0;
 }
 
 void clearSession() {
@@ -137,14 +202,14 @@ bool hasValidSession() {
 bool isTrustedRequestSource() {
   const String origin = server.header("Origin");
   const String referer = server.header("Referer");
-  const String trustedBaseUrl = String("http://") + AP_IP.toString();
+  String sourceHost;
 
   if (origin.length() > 0) {
-    return origin.equals(trustedBaseUrl);
+    return extractHostFromHttpUrl(origin, sourceHost) && isTrustedWebUiHost(sourceHost);
   }
 
   if (referer.length() > 0) {
-    return referer.startsWith(trustedBaseUrl + "/") || referer.equals(trustedBaseUrl);
+    return extractHostFromHttpUrl(referer, sourceHost) && isTrustedWebUiHost(sourceHost);
   }
 
   return true;
