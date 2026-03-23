@@ -101,5 +101,6 @@ extern const size_t DOMAIN_NAME_MAX_LENGTH;          // ドメイン名最大長
 
 // ===== ブロックリストメモリ設定 =====
 extern const size_t BLOCKLIST_BUFFER_SIZE;           // ブロックリスト文字列プールサイズ（バイト）
+extern const size_t BLOCKLIST_UPLOAD_MAX_SIZE;       // ブロックリストアップロード最大サイズ（バイト）
 
 #endif // CONFIG_H

@@ -99,6 +99,7 @@ UDP ポート 53 で動作するカスタム DNS プロキシです。
 
 - 状態変更系エンドポイントでは、セッション確認に加えて CSRF トークン検証と `Origin` / `Referer` 検証を行います。
 - AP パスワード変更後の既存セッションは破棄し、再ログインを要求します。
+- ブロックリスト upload は AP サブネットからの要求に限定し、サイズ上限は `128KB` とします。
 
 ## 7. 設定の永続化 (NVS)
 
@@ -143,6 +144,8 @@ UDP ポート 53 で動作するカスタム DNS プロキシです。
 | **Latency**          | < 10ms added latency                           |
 | **Free Heap**        | Maintenance target > 50 KB (Typically ~200 KB) |
 | **Boot Time**        | < 5 seconds                                    |
+
+- 上流 DNS 応答待ちは最大 `500ms` に制限します。
 
 ## 10. 開発環境
 

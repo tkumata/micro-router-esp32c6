@@ -182,6 +182,17 @@ bool ensureSession(const String& redirectPath = "/") {
   return false;
 }
 
+bool isRequestFromAPSubnet() {
+  IPAddress remoteIP = server.client().remoteIP();
+  for (uint8_t index = 0; index < 4; ++index) {
+    if ((remoteIP[index] & AP_SUBNET[index]) != (AP_IP[index] & AP_SUBNET[index])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool replaceBlocklistFile() {
   // 古いバックアップを削除
   LittleFS.remove(BLOCKLIST_BACKUP_PATH);
@@ -468,6 +479,11 @@ void handleUploadBlocklist() {
     gBlocklistUploadState.failed = false;
     gBlocklistUploadState.message = "";
 
+    if (!isRequestFromAPSubnet()) {
+      markBlocklistUploadFailure("ブロックリスト更新は AP に接続した端末からのみ実行できます。");
+      return;
+    }
+
     if (!ensureSession("/dns-filter")) {
       markBlocklistUploadFailure("ログイン状態を確認できませんでした。再ログインして再度お試しください。");
       return;
@@ -488,6 +504,15 @@ void handleUploadBlocklist() {
   }
   else if (upload.status == UPLOAD_FILE_WRITE) {
     if (uploadFile) {
+      if (upload.totalSize + upload.currentSize > BLOCKLIST_UPLOAD_MAX_SIZE) {
+        Serial.println("ブロックリストサイズ上限を超過");
+        uploadFile.close();
+        uploadFile = File();
+        LittleFS.remove(BLOCKLIST_UPLOAD_PATH);
+        markBlocklistUploadFailure("ブロックリストのサイズが上限を超えています。");
+        return;
+      }
+
       size_t written = uploadFile.write(upload.buf, upload.currentSize);
       if (written != upload.currentSize) {
         Serial.println("一時ファイルへの書き込みに失敗");
@@ -503,6 +528,14 @@ void handleUploadBlocklist() {
       if (!gBlocklistUploadState.failed) {
         markBlocklistUploadFailure("アップロードファイルを処理できませんでした。");
       }
+      return;
+    }
+
+    if (upload.totalSize > BLOCKLIST_UPLOAD_MAX_SIZE) {
+      uploadFile.close();
+      uploadFile = File();
+      LittleFS.remove(BLOCKLIST_UPLOAD_PATH);
+      markBlocklistUploadFailure("ブロックリストのサイズが上限を超えています。");
       return;
     }
 

@@ -54,7 +54,7 @@ const uint32_t MILLISECONDS_TO_SECONDS_DIVISOR = 1000;
 const uint8_t PERCENTAGE_MULTIPLIER = 100;
 
 const IPAddress DEFAULT_UPSTREAM_DNS(8, 8, 8, 8);
-const uint16_t DNS_FORWARD_TIMEOUT = 2000;
+const uint16_t DNS_FORWARD_TIMEOUT = 500;
 const unsigned long DNS_POLLING_INTERVAL = 10;
 
 const size_t DNS_HEADER_SIZE = 12;
@@ -73,3 +73,4 @@ const size_t DOMAIN_NAME_MIN_LENGTH = 3;
 const size_t DOMAIN_NAME_MAX_LENGTH = 253;
 
 const size_t BLOCKLIST_BUFFER_SIZE = 131072;
+const size_t BLOCKLIST_UPLOAD_MAX_SIZE = 131072;
