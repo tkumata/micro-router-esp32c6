@@ -20,6 +20,9 @@ const char* BLOCKLIST_PATH = "/blocklist.txt";
 const char* BLOCKLIST_UPLOAD_PATH = "/blocklist.txt.tmp";
 const char* BLOCKLIST_BACKUP_PATH = "/blocklist.txt.bak";
 const char* CSRF_TOKEN_ARG = "csrf_token";
+const char* SESSION_COOKIE_NAME = "mr_session";
+const char* WEB_UI_HEADER_NAMES[] = {"Origin", "Referer", "Cookie"};
+const unsigned long SESSION_TIMEOUT = 15UL * 60UL * 1000UL;
 
 struct BlocklistUploadState {
   bool failed;
@@ -28,6 +31,8 @@ struct BlocklistUploadState {
 
 BlocklistUploadState gBlocklistUploadState = {false, ""};
 String gCsrfToken;
+String gSessionToken;
+unsigned long gSessionExpiresAt = 0;
 
 void markBlocklistUploadFailure(const String& message) {
   gBlocklistUploadState.failed = true;
@@ -55,6 +60,78 @@ String generateCsrfToken() {
   }
   token[32] = '\0';
   return String(token);
+}
+
+String generateSessionToken() {
+  return generateCsrfToken();
+}
+
+bool isDefaultAPPasswordActive() {
+  return strcmp(config.ap_password, DEFAULT_AP_PASSWORD) == 0;
+}
+
+String extractCookieValue(const String& cookieHeader, const String& cookieName) {
+  String pattern = cookieName + "=";
+  int start = cookieHeader.indexOf(pattern);
+  if (start < 0) {
+    return "";
+  }
+
+  start += pattern.length();
+  int end = cookieHeader.indexOf(';', start);
+  if (end < 0) {
+    end = cookieHeader.length();
+  }
+
+  String value = cookieHeader.substring(start, end);
+  value.trim();
+  return value;
+}
+
+bool isSafeRedirectPath(const String& path) {
+  return path.length() > 0 && path.startsWith("/") && !path.startsWith("//");
+}
+
+void clearSession() {
+  gSessionToken = "";
+  gSessionExpiresAt = 0;
+}
+
+void issueSession() {
+  gSessionToken = generateSessionToken();
+  gSessionExpiresAt = millis() + SESSION_TIMEOUT;
+  server.sendHeader("Set-Cookie",
+                    String(SESSION_COOKIE_NAME) + "=" + gSessionToken +
+                    "; Path=/; HttpOnly; SameSite=Strict");
+}
+
+void expireSessionCookie() {
+  server.sendHeader("Set-Cookie",
+                    String(SESSION_COOKIE_NAME) + "=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
+}
+
+bool hasValidSession() {
+  if (gSessionToken.length() == 0) {
+    return false;
+  }
+
+  if (static_cast<long>(millis() - gSessionExpiresAt) >= 0) {
+    clearSession();
+    return false;
+  }
+
+  String cookieHeader = server.header("Cookie");
+  if (cookieHeader.length() == 0) {
+    return false;
+  }
+
+  String sessionValue = extractCookieValue(cookieHeader, SESSION_COOKIE_NAME);
+  if (sessionValue != gSessionToken) {
+    return false;
+  }
+
+  gSessionExpiresAt = millis() + SESSION_TIMEOUT;
+  return true;
 }
 
 bool isTrustedRequestSource() {
@@ -87,6 +164,22 @@ bool verifyCsrfRequest(const String& backPath = "/") {
   }
 
   return true;
+}
+
+bool ensureSession(const String& redirectPath = "/") {
+  if (isDefaultAPPasswordActive()) {
+    server.sendHeader("Location", "/", true);
+    server.send(HTTP_STATUS_SEE_OTHER);
+    return false;
+  }
+
+  if (hasValidSession()) {
+    return true;
+  }
+
+  server.send(HTTP_STATUS_FORBIDDEN, "text/html",
+              renderLoginPage(gCsrfToken, redirectPath, "Web UI を利用するにはログインが必要です。"));
+  return false;
 }
 
 bool replaceBlocklistFile() {
@@ -130,7 +223,60 @@ extern DNSFilterManager dnsFilter;  // Phase 8
  */
 void setupWebServer() {
   gCsrfToken = generateCsrfToken();
+  server.collectHeaders(WEB_UI_HEADER_NAMES, sizeof(WEB_UI_HEADER_NAMES) / sizeof(WEB_UI_HEADER_NAMES[0]));
   server.on("/", handleRoot);
+  server.on("/login", HTTP_GET, []() {
+    if (isDefaultAPPasswordActive()) {
+      server.send(HTTP_STATUS_OK, "text/html", renderForcePasswordChangePage(gCsrfToken));
+      return;
+    }
+
+    if (hasValidSession()) {
+      server.sendHeader("Location", "/", true);
+      server.send(HTTP_STATUS_SEE_OTHER);
+      return;
+    }
+
+    String redirectPath = server.hasArg("redirect_to") && isSafeRedirectPath(server.arg("redirect_to"))
+      ? server.arg("redirect_to")
+      : "/";
+    server.send(HTTP_STATUS_OK, "text/html", renderLoginPage(gCsrfToken, redirectPath));
+  });
+  server.on("/login", HTTP_POST, []() {
+    if (isDefaultAPPasswordActive()) {
+      server.send(HTTP_STATUS_OK, "text/html", renderForcePasswordChangePage(gCsrfToken));
+      return;
+    }
+
+    if (!verifyCsrfRequest("/login")) {
+      return;
+    }
+
+    String redirectPath = server.hasArg("redirect_to") && isSafeRedirectPath(server.arg("redirect_to"))
+      ? server.arg("redirect_to")
+      : "/";
+    String apPassword = server.arg("ap_password");
+
+    if (apPassword != String(config.ap_password)) {
+      server.send(HTTP_STATUS_FORBIDDEN, "text/html",
+                  renderLoginPage(gCsrfToken, redirectPath, "AP パスワードが一致しません。"));
+      return;
+    }
+
+    issueSession();
+    server.sendHeader("Location", redirectPath, true);
+    server.send(HTTP_STATUS_SEE_OTHER);
+  });
+  server.on("/logout", HTTP_POST, []() {
+    if (!verifyCsrfRequest("/")) {
+      return;
+    }
+
+    clearSession();
+    expireSessionCookie();
+    server.sendHeader("Location", "/login", true);
+    server.send(HTTP_STATUS_SEE_OTHER);
+  });
   server.on("/save", HTTP_POST, handleSave);
   server.on("/save_ap_password", HTTP_POST, handleSaveAPPassword);
 
@@ -176,6 +322,15 @@ void setupWebServer() {
  * PROGMEM テンプレートを使用してメモリを最適化
  */
 void handleRoot() {
+  if (isDefaultAPPasswordActive()) {
+    server.send(HTTP_STATUS_OK, "text/html", renderForcePasswordChangePage(gCsrfToken));
+    return;
+  }
+
+  if (!ensureSession("/")) {
+    return;
+  }
+
   server.send(HTTP_STATUS_OK, "text/html", renderRootPage(gCsrfToken));
 }
 
@@ -183,6 +338,10 @@ void handleRoot() {
  * 設定保存エンドポイント（POST /save）
  */
 void handleSave() {
+  if (!ensureSession("/")) {
+    return;
+  }
+
   if (!verifyCsrfRequest("/")) {
     return;
   }
@@ -221,6 +380,10 @@ void handleSave() {
  * AP パスワード保存エンドポイント（POST /save_ap_password）
  */
 void handleSaveAPPassword() {
+  if (!isDefaultAPPasswordActive() && !ensureSession("/")) {
+    return;
+  }
+
   if (!verifyCsrfRequest("/")) {
     return;
   }
@@ -243,6 +406,8 @@ void handleSaveAPPassword() {
   }
 
   // 成功ページ
+  clearSession();
+  expireSessionCookie();
   server.send(HTTP_STATUS_OK, "text/html",
               buildRestartNoticePage("✓ AP パスワードを保存しました", "再起動後、新しいパスワードで AP に接続してください。"));
   restartDeviceWithLog("AP パスワード保存完了");
@@ -257,6 +422,10 @@ void handleSaveAPPassword() {
  * PROGMEM テンプレートを使用してメモリを最適化
  */
 void handleDNSFilter() {
+  if (!ensureSession("/dns-filter")) {
+    return;
+  }
+
   DNSStats stats = dnsFilter.getStats();
   int blocklistCount = dnsFilter.getBlocklistCount();
   bool enabled = dnsFilter.isEnabled();
@@ -267,6 +436,10 @@ void handleDNSFilter() {
  * DNS フィルタ ON/OFF 切り替え（POST /dns-filter-toggle）
  */
 void handleDNSFilterToggle() {
+  if (!ensureSession("/dns-filter")) {
+    return;
+  }
+
   if (!verifyCsrfRequest("/dns-filter")) {
     return;
   }
@@ -294,6 +467,11 @@ void handleUploadBlocklist() {
   if (upload.status == UPLOAD_FILE_START) {
     gBlocklistUploadState.failed = false;
     gBlocklistUploadState.message = "";
+
+    if (!ensureSession("/dns-filter")) {
+      markBlocklistUploadFailure("ログイン状態を確認できませんでした。再ログインして再度お試しください。");
+      return;
+    }
 
     if (!verifyCsrfRequest("/dns-filter")) {
       markBlocklistUploadFailure("CSRF トークンの検証に失敗しました。ページを再読み込みして再度お試しください。");
@@ -368,6 +546,10 @@ void handleUploadBlocklist() {
  * ブロックリストダウンロード（GET /download-blocklist）
  */
 void handleDownloadBlocklist() {
+  if (!ensureSession("/dns-filter")) {
+    return;
+  }
+
   if (!LittleFS.exists(BLOCKLIST_PATH)) {
     server.send(HTTP_STATUS_NOT_FOUND, "text/plain", "ブロックリストが見つかりません");
     return;

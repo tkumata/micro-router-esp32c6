@@ -42,6 +42,61 @@ button:hover{background:#0056b3;}
 .connected{color:#28a745;}
 .disconnected{color:#dc3545;}
 .section{background:#fff;padding:20px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:20px 0;}
+.notice{background:#fff3cd;color:#856404;border:1px solid #ffeeba;padding:12px 16px;border-radius:6px;margin:20px 0;}
+.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.actions form{margin:0;}
+.actions a{color:#007bff;text-decoration:none;}
+)rawliteral";
+
+const char HTML_LOGIN_TEMPLATE[] PROGMEM = R"rawliteral(
+<!DOCTYPE html><html><head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>Web UI ログイン</title>
+<style>%CSS%</style>
+</head><body>
+<h1>XIAO ESP32C6 マイクロルーター</h1>
+<div class='section'>
+<h2>Web UI ログイン</h2>
+%MESSAGE_BLOCK%
+<p>現在の AP パスワードを入力してください。</p>
+<form method='POST' action='/login'>
+<input type='hidden' name='csrf_token' value='%CSRF_TOKEN%'>
+<input type='hidden' name='redirect_to' value='%REDIRECT_PATH%'>
+<div class='form-group'>
+<label>AP パスワード:</label>
+<input type='password' name='ap_password' placeholder='8文字以上' required minlength='%PASSWORD_MIN%' maxlength='%PASSWORD_MAX%'>
+</div>
+<button type='submit'>ログイン</button>
+</form>
+</div>
+</body></html>
+)rawliteral";
+
+const char HTML_FORCE_PASSWORD_CHANGE_TEMPLATE[] PROGMEM = R"rawliteral(
+<!DOCTYPE html><html><head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>初期 AP パスワード変更</title>
+<style>%CSS%</style>
+</head><body>
+<h1>XIAO ESP32C6 マイクロルーター</h1>
+<div class='notice'>
+初期 AP パスワードのままでは Web UI を利用できません。先に AP パスワードを変更してください。
+</div>
+<div class='section'>
+<h2>AP パスワード変更</h2>
+<p>新しい AP パスワードを設定すると再起動します。再接続後にログイン画面から Web UI を利用できます。</p>
+<form method='POST' action='/save_ap_password'>
+<input type='hidden' name='csrf_token' value='%CSRF_TOKEN%'>
+<div class='form-group'>
+<label>新しい AP パスワード:</label>
+<input type='password' name='ap_password' placeholder='8文字以上' required minlength='%PASSWORD_MIN%' maxlength='%PASSWORD_MAX%'>
+</div>
+<button type='submit'>AP パスワードを保存して再起動</button>
+</form>
+</div>
+</body></html>
 )rawliteral";
 
 const char HTML_ROOT_TEMPLATE[] PROGMEM = R"rawliteral(
@@ -52,9 +107,13 @@ const char HTML_ROOT_TEMPLATE[] PROGMEM = R"rawliteral(
 <style>%CSS%</style>
 </head><body>
 <h1>XIAO ESP32C6 マイクロルーター</h1>
-<div style='margin:20px 0;'>
+<div class='actions' style='margin:20px 0;'>
 <a href='/dns-filter' style='color:#007bff;text-decoration:none;margin-right:15px;'>DNS フィルタリング設定</a>
 <a href='/' style='color:#007bff;text-decoration:none;'>トップページ</a>
+<form method='POST' action='/logout'>
+<input type='hidden' name='csrf_token' value='%CSRF_TOKEN%'>
+<button type='submit' style='width:auto;margin-top:0;padding:8px 14px;'>ログアウト</button>
+</form>
 </div>
 <div class='status'>
 <h2>ステータス</h2>
@@ -112,7 +171,13 @@ button:hover{background:#0056b3;}
 </style>
 </head><body>
 <h1>DNS フィルタリング</h1>
-<p><a href='/' style='color:#007bff;'>← トップページに戻る</a></p>
+<div class='actions'>
+<a href='/' style='color:#007bff;'>← トップページに戻る</a>
+<form method='POST' action='/logout'>
+<input type='hidden' name='csrf_token' value='%CSRF_TOKEN%'>
+<button type='submit' style='width:auto;margin-top:0;padding:8px 14px;'>ログアウト</button>
+</form>
+</div>
 <div class='status'>
 <h2>DNS フィルタ設定</h2>
 <form method='POST' action='/dns-filter-toggle'>
@@ -180,6 +245,31 @@ String buildRestartNoticePage(const String& title, const String& message) {
 
 String buildUploadSuccessPage() {
   return buildBasePage("<h2>アップロード成功</h2><p>ブロックリストが更新されました。</p><a href='/dns-filter'>戻る</a>");
+}
+
+String renderLoginPage(const String& csrfToken, const String& redirectPath, const String& message) {
+  String html = FPSTR(HTML_LOGIN_TEMPLATE);
+  String messageBlock = "";
+  if (message.length() > 0) {
+    messageBlock = "<div class='notice'>" + message + "</div>";
+  }
+
+  html.replace("%CSS%", FPSTR(HTML_COMMON_CSS));
+  html.replace("%MESSAGE_BLOCK%", messageBlock);
+  html.replace("%CSRF_TOKEN%", csrfToken);
+  html.replace("%REDIRECT_PATH%", redirectPath);
+  html.replace("%PASSWORD_MIN%", String(WIFI_PASSWORD_MIN_LENGTH));
+  html.replace("%PASSWORD_MAX%", String(WIFI_PASSWORD_MAX_LENGTH));
+  return html;
+}
+
+String renderForcePasswordChangePage(const String& csrfToken) {
+  String html = FPSTR(HTML_FORCE_PASSWORD_CHANGE_TEMPLATE);
+  html.replace("%CSS%", FPSTR(HTML_COMMON_CSS));
+  html.replace("%CSRF_TOKEN%", csrfToken);
+  html.replace("%PASSWORD_MIN%", String(WIFI_PASSWORD_MIN_LENGTH));
+  html.replace("%PASSWORD_MAX%", String(WIFI_PASSWORD_MAX_LENGTH));
+  return html;
 }
 
 String renderRootPage(const String& csrfToken) {
