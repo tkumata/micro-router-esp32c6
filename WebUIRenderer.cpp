@@ -68,6 +68,7 @@ const char HTML_ROOT_TEMPLATE[] PROGMEM = R"rawliteral(
 <h2>Wi-Fi (STA) 設定</h2>
 <p>接続したい既存の Wi-Fi ネットワークの情報を入力してください。</p>
 <form method='POST' action='/save'>
+<input type='hidden' name='csrf_token' value='%CSRF_TOKEN%'>
 <div class='form-group'>
 <label>既存 Wi-Fi の SSID:</label>
 <input type='text' name='ssid' placeholder='例: MyHomeWiFi' required maxlength='%SSID_MAX%'>
@@ -83,6 +84,7 @@ const char HTML_ROOT_TEMPLATE[] PROGMEM = R"rawliteral(
 <h2>AP パスワード変更</h2>
 <p>このルーターの Wi-Fi アクセスポイント (micro-router-esp32c6) のパスワードを変更できます。</p>
 <form method='POST' action='/save_ap_password'>
+<input type='hidden' name='csrf_token' value='%CSRF_TOKEN%'>
 <div class='form-group'>
 <label>新しい AP パスワード:</label>
 <input type='password' name='ap_password' placeholder='8文字以上' required minlength='%PASSWORD_MIN%' maxlength='%PASSWORD_MAX%'>
@@ -114,6 +116,7 @@ button:hover{background:#0056b3;}
 <div class='status'>
 <h2>DNS フィルタ設定</h2>
 <form method='POST' action='/dns-filter-toggle'>
+<input type='hidden' name='csrf_token' value='%CSRF_TOKEN%'>
 <label>
 <input type='checkbox' name='enabled' %ENABLED_CHECKED%>
 DNS フィルタを有効にする
@@ -132,7 +135,7 @@ DNS フィルタを有効にする
 </div>
 <div class='status'>
 <h2>ブロックリスト管理</h2>
-<form method='POST' action='/upload-blocklist' enctype='multipart/form-data'>
+<form method='POST' action='/upload-blocklist?csrf_token=%CSRF_TOKEN%' enctype='multipart/form-data'>
 <label>domain.txt をアップロード:</label><br>
 <input type='file' name='blocklist' accept='.txt' required><br><br>
 <button type='submit'>アップロード</button>
@@ -179,7 +182,7 @@ String buildUploadSuccessPage() {
   return buildBasePage("<h2>アップロード成功</h2><p>ブロックリストが更新されました。</p><a href='/dns-filter'>戻る</a>");
 }
 
-String renderRootPage() {
+String renderRootPage(const String& csrfToken) {
   bool staConnected = WiFi.status() == WL_CONNECTED;
   String staIP = staConnected ? WiFi.localIP().toString() : "未接続";
   int apClients = WiFi.softAPgetStationNum();
@@ -197,10 +200,11 @@ String renderRootPage() {
   html.replace("%SSID_MAX%", String(WIFI_SSID_MAX_LENGTH));
   html.replace("%PASSWORD_MIN%", String(WIFI_PASSWORD_MIN_LENGTH));
   html.replace("%PASSWORD_MAX%", String(WIFI_PASSWORD_MAX_LENGTH));
+  html.replace("%CSRF_TOKEN%", csrfToken);
   return html;
 }
 
-String renderDNSFilterPage(const DNSStats& stats, int blocklistCount, bool enabled) {
+String renderDNSFilterPage(const DNSStats& stats, int blocklistCount, bool enabled, const String& csrfToken) {
   String html = FPSTR(HTML_DNS_FILTER_TEMPLATE);
   html.replace("%ENABLED_CHECKED%", enabled ? "checked" : "");
   html.replace("%TOTAL_QUERIES%", String(stats.totalQueries));
@@ -209,5 +213,6 @@ String renderDNSFilterPage(const DNSStats& stats, int blocklistCount, bool enabl
   html.replace("%BLOCKLIST_COUNT%", String(blocklistCount));
   html.replace("%BLOCKED_PERCENT%", calculatePercentText(stats.blockedQueries, stats.totalQueries));
   html.replace("%ALLOWED_PERCENT%", calculatePercentText(stats.allowedQueries, stats.totalQueries));
+  html.replace("%CSRF_TOKEN%", csrfToken);
   return html;
 }

@@ -7,7 +7,7 @@
 2. Config.cpp (line 27), docs/usage.md (line 1)
    初期 AP パスワードが固定値 esp32c6router です。SSID も固定なので、近距離の第三者が初期状態のまま接続しやすく、そのまま 1 の無認証 Web UI を操作できます。初期セットアップ時の実質的な防御が弱いです。
 3. WebUIManager.cpp (line 138), WebUIManager.cpp (line 168), WebUIManager.cpp (line 206)
-   CSRF 対策がありません。トークン確認、Origin / Referer 検証がなく、AP に接続中の利用者が悪意あるページを開くと、ブラウザから 192.168.4.1 宛てに勝手に POST され、設定変更や DNS フィルタ改変が成立します。認証がないので成立条件もかなり緩いです。
+   対応済み。状態変更系 POST に対してサーバー起動時生成の CSRF トークン検証を追加し、あわせて Origin / Referer が AP 自身 (`http://192.168.4.1`) かを確認するようにしたため、外部ページからのクロスサイト送信では設定変更や DNS フィルタ改変が成立しにくくなりました。
 5. WebUIManager.cpp (line 223), DNSFilterManager.cpp (line 123)
    可用性面の弱さがあります。ブロックリスト upload にサイズ上限や送信元制限がなく、Flash 容量を圧迫できます。加えて DNS 転送は同期的に最大 2 秒待つため、細かい DNS リクエストを連打されると loop() が詰まり、Web UI やルーティング全体の応答低下を起こしやすいです。遠隔コード実行ではありませんが、DoS には弱い構造です。
 

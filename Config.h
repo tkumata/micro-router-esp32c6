@@ -68,6 +68,7 @@ extern const unsigned long WIFI_CONNECTION_CHECK_DELAY; // WiFi 接続待機時�
 extern const uint16_t HTTP_STATUS_OK;                // 200 OK
 extern const uint16_t HTTP_STATUS_SEE_OTHER;         // 303 See Other
 extern const uint16_t HTTP_STATUS_BAD_REQUEST;       // 400 Bad Request
+extern const uint16_t HTTP_STATUS_FORBIDDEN;         // 403 Forbidden
 extern const uint16_t HTTP_STATUS_NOT_FOUND;         // 404 Not Found
 extern const uint16_t HTTP_STATUS_INTERNAL_ERROR;    // 500 Internal Server Error
 

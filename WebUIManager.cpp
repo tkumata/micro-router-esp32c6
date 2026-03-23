@@ -11,12 +11,15 @@
 #include "WebUIRenderer.h"
 #include <Arduino.h>
 #include <ESP.h>
+#include <inttypes.h>
+#include <esp_system.h>
 #include <LittleFS.h>  // Phase 8
 
 namespace {
 const char* BLOCKLIST_PATH = "/blocklist.txt";
 const char* BLOCKLIST_UPLOAD_PATH = "/blocklist.txt.tmp";
 const char* BLOCKLIST_BACKUP_PATH = "/blocklist.txt.bak";
+const char* CSRF_TOKEN_ARG = "csrf_token";
 
 struct BlocklistUploadState {
   bool failed;
@@ -24,6 +27,7 @@ struct BlocklistUploadState {
 };
 
 BlocklistUploadState gBlocklistUploadState = {false, ""};
+String gCsrfToken;
 
 void markBlocklistUploadFailure(const String& message) {
   gBlocklistUploadState.failed = true;
@@ -41,6 +45,48 @@ void restartDeviceWithLog(const char* logTitle) {
 
   delay(CONFIG_SAVE_DELAY);
   ESP.restart();
+}
+
+String generateCsrfToken() {
+  char token[33];
+  for (size_t index = 0; index < 4; ++index) {
+    uint32_t value = esp_random();
+    snprintf(&token[index * 8], 9, "%08" PRIx32, value);
+  }
+  token[32] = '\0';
+  return String(token);
+}
+
+bool isTrustedRequestSource() {
+  const String origin = server.header("Origin");
+  const String referer = server.header("Referer");
+  const String trustedBaseUrl = String("http://") + AP_IP.toString();
+
+  if (origin.length() > 0) {
+    return origin.equals(trustedBaseUrl);
+  }
+
+  if (referer.length() > 0) {
+    return referer.startsWith(trustedBaseUrl + "/") || referer.equals(trustedBaseUrl);
+  }
+
+  return true;
+}
+
+bool verifyCsrfRequest(const String& backPath = "/") {
+  if (!isTrustedRequestSource()) {
+    server.send(HTTP_STATUS_FORBIDDEN, "text/html",
+                buildSimpleMessagePage("エラー", "不正な送信元からのリクエストを拒否しました。", backPath));
+    return false;
+  }
+
+  if (!server.hasArg(CSRF_TOKEN_ARG) || server.arg(CSRF_TOKEN_ARG) != gCsrfToken) {
+    server.send(HTTP_STATUS_FORBIDDEN, "text/html",
+                buildSimpleMessagePage("エラー", "CSRF トークンの検証に失敗しました。ページを再読み込みして再度お試しください。", backPath));
+    return false;
+  }
+
+  return true;
 }
 
 bool replaceBlocklistFile() {
@@ -83,6 +129,7 @@ extern DNSFilterManager dnsFilter;  // Phase 8
  * Web サーバーのセットアップ
  */
 void setupWebServer() {
+  gCsrfToken = generateCsrfToken();
   server.on("/", handleRoot);
   server.on("/save", HTTP_POST, handleSave);
   server.on("/save_ap_password", HTTP_POST, handleSaveAPPassword);
@@ -129,13 +176,17 @@ void setupWebServer() {
  * PROGMEM テンプレートを使用してメモリを最適化
  */
 void handleRoot() {
-  server.send(HTTP_STATUS_OK, "text/html", renderRootPage());
+  server.send(HTTP_STATUS_OK, "text/html", renderRootPage(gCsrfToken));
 }
 
 /**
  * 設定保存エンドポイント（POST /save）
  */
 void handleSave() {
+  if (!verifyCsrfRequest("/")) {
+    return;
+  }
+
   // フォームデータ取得
   String ssid = server.arg("ssid");
   String password = server.arg("password");
@@ -170,6 +221,10 @@ void handleSave() {
  * AP パスワード保存エンドポイント（POST /save_ap_password）
  */
 void handleSaveAPPassword() {
+  if (!verifyCsrfRequest("/")) {
+    return;
+  }
+
   // フォームデータ取得
   String apPassword = server.arg("ap_password");
 
@@ -205,13 +260,17 @@ void handleDNSFilter() {
   DNSStats stats = dnsFilter.getStats();
   int blocklistCount = dnsFilter.getBlocklistCount();
   bool enabled = dnsFilter.isEnabled();
-  server.send(HTTP_STATUS_OK, "text/html", renderDNSFilterPage(stats, blocklistCount, enabled));
+  server.send(HTTP_STATUS_OK, "text/html", renderDNSFilterPage(stats, blocklistCount, enabled, gCsrfToken));
 }
 
 /**
  * DNS フィルタ ON/OFF 切り替え（POST /dns-filter-toggle）
  */
 void handleDNSFilterToggle() {
+  if (!verifyCsrfRequest("/dns-filter")) {
+    return;
+  }
+
   bool enabled = server.hasArg("enabled");
 
   // 設定を保存
@@ -235,6 +294,11 @@ void handleUploadBlocklist() {
   if (upload.status == UPLOAD_FILE_START) {
     gBlocklistUploadState.failed = false;
     gBlocklistUploadState.message = "";
+
+    if (!verifyCsrfRequest("/dns-filter")) {
+      markBlocklistUploadFailure("CSRF トークンの検証に失敗しました。ページを再読み込みして再度お試しください。");
+      return;
+    }
     uploadFile = File();
     Serial.printf("アップロード開始: %s\n", upload.filename.c_str());
     LittleFS.remove(BLOCKLIST_UPLOAD_PATH);
